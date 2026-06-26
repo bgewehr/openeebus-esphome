@@ -21,6 +21,7 @@ Example YAML:
         - logger.log: "K40RF disconnected"
 """
 
+import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
@@ -70,6 +71,10 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
+    openeebus_root = os.path.normpath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "openeebus")
+    )
+    cg.add_build_flag(f"-I{openeebus_root}")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
