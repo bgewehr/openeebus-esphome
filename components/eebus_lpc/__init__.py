@@ -195,6 +195,13 @@ async def to_code(config):
     ))
     if idf_cjson:
         cg.add_build_flag("-I" + os.path.dirname(idf_cjson[0]).replace("\\", "/"))
+
+    # esp_websocket_client is required by the port/esp32 WebSocket client layer
+    # (used by eebus_wp for outbound SHIP connections to the K40RF gateway).
+    # In ESP-IDF 5.x it is a managed component — declare it so the IDF
+    # Component Manager downloads and includes it in the build.
+    from esphome.components.esp32 import add_idf_component
+    add_idf_component(name="espressif/esp_websocket_client", ref="1.3.0")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_ship_port(config[CONF_SHIP_PORT]))
