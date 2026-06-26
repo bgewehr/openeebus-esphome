@@ -68,6 +68,15 @@ async def to_code(config):
     openeebus_root = os.path.join(repo_root, "openeebus")
     for path in (repo_root, openeebus_root):
         cg.add_build_flag("-I" + path.replace("\\", "/"))
+
+    # Register the openeebus C library as an ESP-IDF component so its
+    # .c sources are compiled and linked. This is the supported ESPHome
+    # API: board_build.cmake_extra_args passes -D flags to the IDF CMake.
+    idf_component_dir = os.path.join(repo_root, "port", "esp32", "component")
+    cg.add_platformio_option(
+        "board_build.cmake_extra_args",
+        "-DEXTRA_COMPONENT_DIRS=" + idf_component_dir.replace("\\", "/"),
+    )
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_ship_port(config[CONF_SHIP_PORT]))

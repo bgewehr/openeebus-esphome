@@ -390,13 +390,11 @@ bool EebusLpcComponent::load_or_generate_cert_() {
   mbedtls_x509write_cert   crt;
   mbedtls_entropy_context  entropy;
   mbedtls_ctr_drbg_context drbg;
-  mbedtls_mpi              serial;
 
   mbedtls_pk_init(&pk);
   mbedtls_x509write_crt_init(&crt);
   mbedtls_entropy_init(&entropy);
   mbedtls_ctr_drbg_init(&drbg);
-  mbedtls_mpi_init(&serial);
 
   bool ok = false;
   do {
@@ -419,8 +417,9 @@ bool EebusLpcComponent::load_or_generate_cert_() {
     mbedtls_x509write_crt_set_issuer_name(&crt, subj.c_str());
     mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
     mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
-    mbedtls_mpi_read_string(&serial, 10, "1");
-    mbedtls_x509write_crt_set_serial(&crt, &serial);
+    // Use non-deprecated serial API (mbedTLS 3.x / ESP-IDF 5.x)
+    uint8_t serial_bytes[] = {0x01};
+    mbedtls_x509write_crt_set_serial_raw(&crt, serial_bytes, sizeof(serial_bytes));
     mbedtls_x509write_crt_set_validity(&crt, "20250101000000", "20350101000000");
     mbedtls_x509write_crt_set_subject_key_identifier(&crt);
     mbedtls_x509write_crt_set_authority_key_identifier(&crt);
@@ -438,7 +437,6 @@ bool EebusLpcComponent::load_or_generate_cert_() {
   mbedtls_x509write_crt_free(&crt);
   mbedtls_entropy_free(&entropy);
   mbedtls_ctr_drbg_free(&drbg);
-  mbedtls_mpi_free(&serial);
   return ok;
 }
 
