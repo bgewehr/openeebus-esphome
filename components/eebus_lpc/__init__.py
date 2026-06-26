@@ -215,6 +215,7 @@ async def to_code(config):
     # The SHIP server uses TLS (httpd_ssl_config_t, httpd_ssl_start) which lives
     # in esp_https_server — excluded by ESPHome by default.
     include_builtin_idf_component("esp_https_server")
+    add_idf_sdkconfig_option("CONFIG_ESP_HTTPS_SERVER_ENABLE", True)
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

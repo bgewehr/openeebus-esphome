@@ -351,7 +351,7 @@ static WebsocketObject* CreatorCreateWebsocket(
   ssl_cfg.prvtkey_len          = ws->key_der_len;
 
   /* Client cert required (mutual TLS per SHIP spec) */
-  ssl_cfg.httpd_config.max_open_sockets = 4;
+  ssl_cfg.httpd.max_open_sockets = 4;
 
   esp_err_t ret = httpd_ssl_start(&ws->server, &ssl_cfg);
   if (ret != ESP_OK) {
