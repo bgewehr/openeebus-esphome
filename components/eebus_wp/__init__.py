@@ -71,9 +71,9 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
-    component_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    openeebus_root = os.path.join(component_root, "openeebus")
-    for path in (component_root, openeebus_root):
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    openeebus_root = os.path.join(repo_root, "openeebus")
+    for path in (repo_root, openeebus_root):
         cg.add_build_flag("-I" + path.replace("\\", "/"))
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

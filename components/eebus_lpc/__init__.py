@@ -61,13 +61,12 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
-    # Two include roots are needed:
-    #   1. openeebus/  — for src/service/api/... and src/spine/... headers
-    #   2. component repo root (b72b2cfd/)  — for port/esp32/websocket/... headers
+    # __file__ = b72b2cfd/components/eebus_lpc/__init__.py
+    # Three dirname calls reach the repo root (b72b2cfd/).
     # Forward slashes required: Xtensa GCC rejects backslash paths on Windows.
-    component_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    openeebus_root = os.path.join(component_root, "openeebus")
-    for path in (component_root, openeebus_root):
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    openeebus_root = os.path.join(repo_root, "openeebus")
+    for path in (repo_root, openeebus_root):
         cg.add_build_flag("-I" + path.replace("\\", "/"))
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
