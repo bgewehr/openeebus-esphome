@@ -1,0 +1,384 @@
+# ============================================================================
+# ESPHome HEMS – §14a EnWG, EEBus LPC + Web UI
+# bgewehr / bg-hems branch
+#
+# Hardware: ESP32 Hutschienen-Gerät (z.B. Olimex ESP32-POE-ISO)
+# SteuVE:   Bosch Compress 5800i (SG-Ready DO1/DO2)
+#           Shell Recharge Wallbox (Modbus TCP)
+# ============================================================================
+
+esphome:
+  name: hems-14a
+  friendly_name: "HEMS §14a"
+  platform: ESP32
+  board: esp32-poe-iso
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://bgewehr/openeebus@bg-hems
+    components: [eebus_lpc]
+    refresh: 1d
+
+ethernet:
+  type: LAN8720
+  mdc_pin: GPIO23
+  mdio_pin: GPIO18
+  clk_mode: GPIO17_OUT
+  phy_addr: 0
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ============================================================================
+# Web Server – HEMS Status & Pairing UI
+# http://<ip-adresse>/
+# ============================================================================
+web_server:
+  port: 80
+  version: 3
+
+# ============================================================================
+# EEBus LPC – §14a EnWG Steuerempfänger
+# ============================================================================
+eebus_lpc:
+  id: hems_lpc
+  ship_port: 4712
+  # remote_ski leer lassen → Pairing-Modus.
+  # Nach erstem Pairing wird die SKI in NVS gespeichert und hier nicht mehr benötigt.
+  # Alternativ: SKI aus dem Web UI ablesen und hier eintragen für explizites Whitelisting.
+  remote_ski: ""
+  device_brand: "DIY"
+  device_type: "HEMS"
+  device_model: "ESP32-HEMS-14a"
+  failsafe_limit_w: 4200.0
+
+  # Steuerungsfall aktiv: Leistungsbegrenzung durch VNB
+  on_limit_active:
+    - then:
+        - lambda: |-
+            float limit_w = x;
+            // WP-Reserve: ca. 3900 W Nennaufnahme Bosch Compress 5800i
+            float wallbox_w = limit_w - 3900.0f;
+            if (wallbox_w < 1380.0f) {
+              // Nicht genug für WP + Wallbox: WP in Modus 1 (EVU-Sperre)
+              id(sg_ready_bit1).turn_off();
+              id(sg_ready_bit2).turn_off();
+              wallbox_w = limit_w;
+            } else {
+              // WP Modus 2 (Normal), Wallbox gedimmt
+              id(sg_ready_bit1).turn_on();
+              id(sg_ready_bit2).turn_off();
+            }
+            float a = wallbox_w / (3.0f * 230.0f);
+            if (a < 6.0f)  a = 6.0f;
+            if (a > 16.0f) a = 16.0f;
+            id(wallbox_ladestrom).set_value(a);
+
+  # Steuerungsfall beendet: Normalbetrieb
+  on_limit_cleared:
+    - then:
+        - lambda: |-
+            id(sg_ready_bit1).turn_on();   // WP Modus 2
+            id(sg_ready_bit2).turn_off();
+            id(wallbox_ladestrom).set_value(16.0f);
+
+  # Pairing-Anfrage: unbekannte Steuerbox hat sich verbunden
+  on_pairing_request:
+    - then:
+        - lambda: |-
+            ESP_LOGW("hems", "Pairing-Anfrage von SKI: %s", x.c_str());
+            // SKI erscheint automatisch im Web UI unter "Pairing SKI (ausstehend)"
+            // → Benutzer drückt "Pairing akzeptieren" Button im Web UI
+
+# ============================================================================
+# Relaiskontakt-Fallback: DI1 von CLS-Steuerbox (Option bis 31.12.2028)
+# ============================================================================
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO4
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "VNB Relaissignal (DI1)"
+    id: vnb_relay_signal
+    device_class: power
+    on_press:
+      - lambda: |-
+          // Nur aktiv wenn kein EEBus-Limit aktiv
+          if (!id(hems_lpc).is_limit_active()) {
+            id(sg_ready_bit1).turn_off();
+            id(sg_ready_bit2).turn_off();
+            id(wallbox_ladestrom).set_value(6.0f);
+          }
+    on_release:
+      - lambda: |-
+          if (!id(hems_lpc).is_limit_active()) {
+            id(sg_ready_bit1).turn_on();
+            id(sg_ready_bit2).turn_off();
+            id(wallbox_ladestrom).set_value(16.0f);
+          }
+
+# ============================================================================
+# SG-Ready Ausgänge (Bosch Compress 5800i)
+# ============================================================================
+switch:
+  - platform: gpio
+    pin: GPIO18
+    name: "SG-Ready Bit 1 (DO1)"
+    id: sg_ready_bit1
+    restore_mode: RESTORE_DEFAULT_ON
+
+  - platform: gpio
+    pin: GPIO19
+    name: "SG-Ready Bit 2 (DO2)"
+    id: sg_ready_bit2
+    restore_mode: RESTORE_DEFAULT_OFF
+
+# ============================================================================
+# Wallbox Ladestrom via Modbus TCP (Shell Recharge)
+# ============================================================================
+modbus_controller:
+  - id: wallbox_ctrl
+    address: 0x01
+    update_interval: 10s
+
+number:
+  - platform: modbus_controller
+    modbus_controller_id: wallbox_ctrl
+    name: "Wallbox Ladestrom Sollwert"
+    id: wallbox_ladestrom
+    icon: "mdi:ev-station"
+    register_type: holding
+    address: 261
+    value_type: U_WORD
+    min_value: 6
+    max_value: 16
+    step: 1
+    unit_of_measurement: "A"
+    lambda: "return x / 10.0;"
+    write_lambda: "return x * 10.0;"
+
+# ============================================================================
+# Sensoren – erscheinen im Web UI unter "Sensoren"
+# ============================================================================
+sensor:
+  - platform: template
+    name: "VNB Leistungslimit"
+    id: vnb_power_limit
+    icon: "mdi:transmission-tower"
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: "return id(hems_lpc).current_limit_w();"
+
+  - platform: template
+    name: "Verfügbare Restleistung"
+    icon: "mdi:gauge"
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      if (!id(hems_lpc).is_limit_active()) return 99999.0f;
+      return id(hems_lpc).current_limit_w() - 3900.0f;
+
+  - platform: modbus_controller
+    modbus_controller_id: wallbox_ctrl
+    name: "Wallbox Ist-Leistung"
+    icon: "mdi:car-electric"
+    register_type: holding
+    address: 300
+    value_type: U_WORD
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+
+# ============================================================================
+# Text-Sensoren – Klartext-Status im Web UI
+# ============================================================================
+text_sensor:
+  # --- Pairing / Verbindungsstatus ---
+  - platform: template
+    name: "EEBus Pairing-Status"
+    icon: "mdi:lan-connect"
+    update_interval: 5s
+    lambda: "return id(hems_lpc).pairing_state();"
+
+  - platform: template
+    name: "Eigene SKI (lokal)"
+    icon: "mdi:key"
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(hems_lpc).local_ski();"
+
+  - platform: template
+    name: "Gepaarte Steuerbox-SKI"
+    icon: "mdi:key-chain"
+    update_interval: 10s
+    entity_category: diagnostic
+    lambda: |-
+      std::string ski = id(hems_lpc).paired_remote_ski();
+      return ski.empty() ? std::string("(keine)") : ski;
+
+  - platform: template
+    name: "Pairing SKI (ausstehend)"
+    icon: "mdi:key-alert"
+    update_interval: 3s
+    lambda: |-
+      std::string ski = id(hems_lpc).pending_remote_ski();
+      return ski.empty() ? std::string("(keine)") : ski;
+
+  # --- Betriebszustand ---
+  - platform: template
+    name: "§14a Steuerungskanal"
+    icon: "mdi:transmission-tower"
+    update_interval: 5s
+    lambda: |-
+      if (id(hems_lpc).is_limit_active())  return std::string("EEBus (digital)");
+      if (id(vnb_relay_signal).state)       return std::string("Relaiskontakt (FNN-2bit)");
+      return                                       std::string("Kein Eingriff aktiv");
+
+  - platform: template
+    name: "SG-Ready Modus"
+    icon: "mdi:heat-pump"
+    update_interval: 5s
+    lambda: |-
+      bool b1 = id(sg_ready_bit1).state;
+      bool b2 = id(sg_ready_bit2).state;
+      if (!b1 && !b2) return std::string("Modus 1 – EVU-Sperre");
+      if ( b1 && !b2) return std::string("Modus 2 – Normalbetrieb");
+      if (!b1 &&  b2) return std::string("Modus 3 – PV-Empfehlung");
+      return                 std::string("Modus 4 – Maximalleistung");
+
+  - platform: template
+    name: "Mindestleistung §14a"
+    icon: "mdi:lightning-bolt-circle"
+    update_interval: never
+    entity_category: diagnostic
+    lambda: "return std::string(\"4200 W (gesetzl. Minimum §14a EnWG)\");"
+
+# ============================================================================
+# Buttons – Pairing-Steuerung und Diagnose (erscheinen im Web UI)
+# ============================================================================
+button:
+  # --- Pairing ---
+  - platform: template
+    name: "Pairing akzeptieren ✓"
+    icon: "mdi:check-circle"
+    on_press:
+      - lambda: "id(hems_lpc).accept_pairing();"
+
+  - platform: template
+    name: "Pairing ablehnen ✗"
+    icon: "mdi:close-circle"
+    on_press:
+      - lambda: "id(hems_lpc).reject_pairing();"
+
+  - platform: template
+    name: "Pairing zurücksetzen"
+    icon: "mdi:lock-reset"
+    entity_category: diagnostic
+    on_press:
+      - lambda: "id(hems_lpc).forget_pairing(id(hems_lpc).paired_remote_ski());"
+
+  # --- Diagnose ---
+  - platform: template
+    name: "Failsafe testen (4200 W)"
+    icon: "mdi:shield-check"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(sg_ready_bit1).turn_off();
+          id(sg_ready_bit2).turn_off();
+          id(wallbox_ladestrom).set_value(6.0f);
+
+  - platform: template
+    name: "Normalbetrieb wiederherstellen"
+    icon: "mdi:restore"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(sg_ready_bit1).turn_on();
+          id(sg_ready_bit2).turn_off();
+          id(wallbox_ladestrom).set_value(16.0f);
+
+# ============================================================================
+# EEBus WP – Leistungssteuerung Bosch Compress 5800i via K40RF Gateway
+# Der HEMS agiert als Energy Guard (EG) und sendet Limits an die WP.
+# Das K40RF wird automatisch per mDNS gefunden.
+# ============================================================================
+eebus_wp:
+  id: hems_wp
+  ship_port: 4713           # Zweiter Port — getrennt von eebus_lpc (4712)
+  # SKI des K40RF — nach erstem Pairing im Web UI unter "K40RF SKI" sichtbar.
+  # Leer lassen für Auto-Discovery beim ersten Start.
+  remote_ski: ""
+  failsafe_limit_w: 4200.0  # WP läuft im Failsafe mit Mindestleistung
+  failsafe_duration_s: 7200 # 2 Stunden Failsafe-Dauer (SHIP-Vorgabe: 2–24h)
+
+  on_wp_connected:
+    - logger.log: "K40RF verbunden — EEBus WP-Steuerung aktiv"
+
+  on_wp_disconnected:
+    - logger.log: "K40RF getrennt — Fallback auf SG-Ready"
+
+  on_power_reading:
+    - lambda: |-
+        // Aktueller WP-Verbrauch vom K40RF per MPC gemeldet
+        ESP_LOGI("hems", "WP Ist-Leistung: %.0f W", x);
+
+# Web-UI Sensoren für WP EEBus Status
+text_sensor:
+  - platform: template
+    name: "K40RF Verbindungsstatus"
+    icon: "mdi:heat-pump"
+    update_interval: 5s
+    lambda: "return id(hems_wp).pairing_state();"
+
+  - platform: template
+    name: "K40RF SKI"
+    icon: "mdi:key-chain"
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: |-
+      std::string ski = id(hems_wp).remote_ski();
+      return ski.empty() ? std::string("(suche...)") : ski;
+
+sensor:
+  - platform: template
+    name: "WP Ist-Leistung (EEBus)"
+    icon: "mdi:heat-pump"
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: "return id(hems_wp).current_power_w();"
+
+  - platform: template
+    name: "WP Aktives Limit"
+    icon: "mdi:gauge"
+    unit_of_measurement: "W"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: "return id(hems_wp).active_limit_w();"
+
+button:
+  - platform: template
+    name: "WP Limit auf 4200 W (§14a Minimum)"
+    icon: "mdi:lightning-bolt-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: "id(hems_wp).set_limit(4200.0f);"
+
+  - platform: template
+    name: "WP Vollleistung freigeben"
+    icon: "mdi:check-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: "id(hems_wp).clear_limit();"

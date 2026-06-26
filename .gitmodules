@@ -1,0 +1,4 @@
+[submodule "openeebus"]
+	path = openeebus
+	url = https://github.com/NIBEGroup/openeebus.git
+	branch = main

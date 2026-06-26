@@ -1,0 +1,14 @@
+openeebus-esphome
+Copyright 2025 bgewehr
+
+This project is based on and incorporates code from:
+
+  openeebus — EEBus SHIP/SPINE protocol library in C
+  Copyright 2025 NIBE AB
+  Licensed under the Apache License, Version 2.0
+  Source: https://github.com/NIBEGroup/openeebus
+
+The openeebus library provides the complete EEBus SHIP/SPINE/LPC protocol
+implementation. This project contributes an ESP32 platform port (WebSocket
+adapter layer) and ESPHome external component wrappers. All upstream source
+files from NIBEGroup/openeebus are used unmodified via git submodule.

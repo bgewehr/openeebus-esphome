@@ -1,0 +1,40 @@
+# ESPHome build artifacts
+.esphome/
+build/
+*.bin
+*.elf
+*.map
+
+# ESPHome secrets
+secrets.yaml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# CMake / ESP-IDF build
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+sdkconfig
+sdkconfig.old
+dependencies.lock
+managed_components/
+.idf_version
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
