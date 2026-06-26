@@ -61,30 +61,33 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 def _generate_unity_build(component_dir, repo_root):
-    """Generate openeebus_unity.c using include-path-relative paths.
+    """Generate per-source wrapper .c files for the openeebus library.
 
-    The compiler receives two -I flags:
-      1. repo_root/          (b72b2cfd/)
-      2. repo_root/openeebus (b72b2cfd/openeebus/)
+    Each wrapper includes exactly one openeebus C source file, so every
+    openeebus source compiles as its own translation unit. This avoids
+    symbol collisions that occur with a single-file unity build (the
+    openeebus code uses file-scoped static function names that collide
+    across translation units).
 
-    So openeebus sources are included as:
-      #include "src/common/..."        (resolved via -I openeebus/)
-    And ESP32 port sources as:
-      #include "port/esp32/websocket/" (resolved via -I repo_root/)
+    All wrappers are placed in component_dir alongside this __init__.py.
+    ESPHome's ComponentManifest scans that directory for .c files and
+    copies them to build/src/esphome/components/eebus_lpc/.
+    The generated src/CMakeLists.txt uses GLOB_RECURSE, so they are
+    compiled automatically.
 
-    This makes the generated unity file completely path-independent —
-    the same content works on any machine because the paths are relative
-    to the stable -I include roots, not to the file's location on disk.
+    Include paths are relative to the -I search roots:
+      -I repo_root/openeebus/  ->  #include "src/common/foo.c"
+      -I repo_root/            ->  #include "port/esp32/websocket/bar.c"
     """
     openeebus_src = os.path.join(repo_root, "openeebus", "src")
     port_ws       = os.path.join(repo_root, "port", "esp32", "websocket")
 
     EXCLUDE = {
-        "debug.c",                  # libwebsockets → replaced inline
-        "tls_certificate.c",        # OpenSSL → _mbedtls.c used
-        "eebus_mutex.c",            # pthread → _freertos.c used
-        "eebus_thread.c",           # pthread → _freertos.c used
-        "eebus_queue.c",            # pthread → _freertos.c used
+        "debug.c",                  # libwebsockets → replaced inline (see below)
+        "tls_certificate.c",        # OpenSSL      → _mbedtls.c used
+        "eebus_mutex.c",            # pthread       → _freertos.c used
+        "eebus_thread.c",           # pthread       → _freertos.c used
+        "eebus_queue.c",            # pthread       → _freertos.c used
         "websocket.c",              # libwebsockets → port/esp32/ replaces all
         "websocket_client.c",
         "websocket_server.c",
@@ -101,74 +104,82 @@ def _generate_unity_build(component_dir, repo_root):
     def should_exclude(fname):
         return fname in EXCLUDE or any(p in fname for p in EXCLUDE_PATTERNS)
 
-    # Collect openeebus C sources; express paths relative to openeebus_root
-    # so the compiler finds them via the second -I flag.
-    oe_includes = []
+    # Remove previously generated wrapper files (prefix oe__)
+    for f in os.listdir(component_dir):
+        if f.startswith("oe__") and f.endswith(".c"):
+            os.remove(os.path.join(component_dir, f))
+
+    written = []
+
+    # debug.c replacement — single wrapper with inline ESP32 implementation
+    debug_path = os.path.join(component_dir, "oe__debug_esp32.c")
+    with open(debug_path, "w", encoding="utf-8") as fh:
+        fh.write(
+            "// ESP32 replacement for openeebus src/common/debug.c\n"
+            "// (original requires libwebsockets)\n"
+            "#include <stdarg.h>\n"
+            "#include <stddef.h>\n"
+            '#include "esp_log.h"\n'
+            "#define EEBUS_PLATFORM_FREERTOS 1\n"
+            "#define EEBUS_PLATFORM_ESP32    1\n"
+            'static const char *EEBUS_DBG_TAG_ = "openeebus";\n'
+            "void DebugPrintf(const char *format, ...) {\n"
+            "  va_list args; va_start(args, format);\n"
+            "  esp_log_writev(ESP_LOG_DEBUG, EEBUS_DBG_TAG_, format, args);\n"
+            "  va_end(args);\n"
+            "}\n"
+            "void DebugHexdump(void *data, size_t data_size) {\n"
+            "  ESP_LOG_BUFFER_HEXDUMP(EEBUS_DBG_TAG_, data, data_size, ESP_LOG_DEBUG);\n"
+            "}\n"
+        )
+    written.append("oe__debug_esp32.c")
+
+    # One wrapper per openeebus C source
     for root, _, files in os.walk(openeebus_src):
         for fname in sorted(files):
-            if fname.endswith(".c") and not should_exclude(fname):
-                rel = os.path.relpath(
-                    os.path.join(root, fname), os.path.join(repo_root, "openeebus")
-                ).replace("\\", "/")
-                oe_includes.append(rel)
-    oe_includes.sort()
+            if not fname.endswith(".c") or should_exclude(fname):
+                continue
+            src_path = os.path.join(root, fname)
+            rel = os.path.relpath(src_path, os.path.join(repo_root, "openeebus")).replace("\\", "/")
+            # Unique filename: flatten path, prefix oe__
+            safe_name = "oe__" + rel.replace("/", "__").replace(".", "_") + ".c"
+            wrapper = os.path.join(component_dir, safe_name)
+            with open(wrapper, "w", encoding="utf-8") as fh:
+                fh.write(
+                    f"// openeebus wrapper: {rel}\n"
+                    "#define EEBUS_PLATFORM_FREERTOS 1\n"
+                    "#define EEBUS_PLATFORM_ESP32    1\n"
+                    f'#include "{rel}"\n'
+                )
+            written.append(safe_name)
 
-    # ESP32 port sources; express relative to repo_root
-    # so the compiler finds them via the first -I flag.
-    port_includes = sorted(
-        "port/esp32/websocket/" + f
-        for f in os.listdir(port_ws)
-        if f.endswith(".c")
-    )
+    # One wrapper per ESP32 port source
+    for fname in sorted(os.listdir(port_ws)):
+        if not fname.endswith(".c"):
+            continue
+        rel = f"port/esp32/websocket/{fname}"
+        safe_name = "oe__" + rel.replace("/", "__").replace(".", "_") + ".c"
+        wrapper = os.path.join(component_dir, safe_name)
+        with open(wrapper, "w", encoding="utf-8") as fh:
+            fh.write(
+                f"// openeebus ESP32 port wrapper: {fname}\n"
+                "#define EEBUS_PLATFORM_FREERTOS 1\n"
+                "#define EEBUS_PLATFORM_ESP32    1\n"
+                f'#include "{rel}"\n'
+            )
+        written.append(safe_name)
 
-    lines = [
-        "// openeebus_unity.c — generated by eebus_lpc/__init__.py",
-        "// Overwritten on every `esphome compile`. Do not edit manually.",
-        "//",
-        "// Paths are relative to the -I include roots, not to this file.",
-        "// This file is portable: no machine-specific absolute paths.",
-        "",
-        "#define EEBUS_PLATFORM_FREERTOS 1",
-        "#define EEBUS_PLATFORM_ESP32    1",
-        "",
-        "// ESP32 replacement for src/common/debug.c",
-        "// (original requires libwebsockets; we use esp_log instead)",
-        "#include <stdarg.h>",
-        "#include <stddef.h>",
-        '#include "esp_log.h"',
-        'static const char *EEBUS_DBG_TAG_ = "openeebus";',
-        "void DebugPrintf(const char *format, ...) {",
-        "  va_list args; va_start(args, format);",
-        "  esp_log_writev(ESP_LOG_DEBUG, EEBUS_DBG_TAG_, format, args);",
-        "  va_end(args);",
-        "}",
-        "void DebugHexdump(void *data, size_t data_size) {",
-        "  ESP_LOG_BUFFER_HEXDUMP(EEBUS_DBG_TAG_, data, data_size, ESP_LOG_DEBUG);",
-        "}",
-        "",
-        f"// openeebus core ({len(oe_includes)} files, resolved via -I openeebus/)",
-    ]
-    for inc in oe_includes:
-        lines.append(f'#include "{inc}"')
-    lines += [
-        "",
-        f"// ESP32 WebSocket port ({len(port_includes)} files, resolved via -I repo_root/)",
-    ]
-    for inc in port_includes:
-        lines.append(f'#include "{inc}"')
-
-    unity_path = os.path.join(component_dir, "openeebus_unity.c")
-    with open(unity_path, "w", encoding="utf-8") as fh:
-        fh.write("\n".join(lines) + "\n")
+    return written
 
 
 async def to_code(config):
     component_dir = os.path.dirname(os.path.abspath(__file__))
     repo_root     = os.path.dirname(os.path.dirname(component_dir))
 
-    # Generate openeebus_unity.c with include-path-relative paths.
-    # Runs before ESPHome copies source files to build/src/, so the
-    # generated content will be used in the build.
+    # Generate per-source wrapper .c files (oe__*.c) in this directory.
+    # Each wrapper includes exactly one openeebus C source so they compile
+    # as separate translation units — avoids symbol collisions in unity builds.
+    # Runs before ESPHome copies source files to build/src/.
     _generate_unity_build(component_dir, repo_root)
 
     # Add include search paths (forward slashes — required by Xtensa GCC on Windows).
