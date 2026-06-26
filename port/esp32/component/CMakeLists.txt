@@ -10,8 +10,8 @@
 
 cmake_minimum_required(VERSION 3.16)
 
-# Root of the openeebus repo (two levels up from this file)
-get_filename_component(OPENEEBUS_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+# Root of the openeebus submodule (repo_root/openeebus/)
+get_filename_component(OPENEEBUS_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../openeebus" ABSOLUTE)
 
 # Collect all openeebus C sources except platform-specific alternatives
 # (we provide our own websocket and use the built-in freertos impls)
