@@ -68,6 +68,18 @@ async def to_code(config):
     openeebus_root = os.path.join(repo_root, "openeebus")
     for path in (repo_root, openeebus_root):
         cg.add_build_flag("-I" + path.replace("\\", "/"))
+
+    # cJSON is included by openeebus ship_message files as <cjson/cJSON.h>.
+    # ESP-IDF ships cJSON at components/json/cJSON/ — add that to the include path.
+    import glob as _glob
+    idf_dirs = _glob.glob(os.path.join(
+        os.path.expanduser("~"), ".platformio", "packages", "framework-espidf*",
+        "components", "json", "cJSON"
+    ))
+    if idf_dirs:
+        # The include is <cjson/cJSON.h>, so we need the parent of cJSON/
+        cg.add_build_flag("-I" + os.path.dirname(idf_dirs[0]).replace("\\", "/"))
+
     # The openeebus C library is compiled via openeebus_unity.c which lives
     # alongside this __init__.py. ESPHome picks up all .c files in the
     # component package directory and copies them into the build src/.
