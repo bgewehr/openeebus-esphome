@@ -32,6 +32,7 @@
 #include "websocket_server_esp32.h"
 
 #include <esp_http_server.h>
+#include <esp_https_server.h>
 #include <esp_log.h>
 #include <esp_tls.h>
 #include <freertos/FreeRTOS.h>

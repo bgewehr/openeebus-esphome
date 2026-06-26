@@ -200,13 +200,21 @@ async def to_code(config):
     # (used by eebus_wp for outbound SHIP connections to the K40RF gateway).
     # In ESP-IDF 5.x it is a managed component — declare it so the IDF
     # Component Manager downloads and includes it in the build.
-    from esphome.components.esp32 import add_idf_component, add_idf_sdkconfig_option
+    from esphome.components.esp32 import (
+        add_idf_component,
+        add_idf_sdkconfig_option,
+        include_builtin_idf_component,
+    )
     add_idf_component(name="espressif/esp_websocket_client", ref="1.3.0")
 
     # The port/esp32 WebSocket server layer uses the ESP-IDF HTTP server's
     # built-in WebSocket support (httpd_ws_frame_t, httpd_ws_send_frame, etc.).
     # Enable it in sdkconfig so the relevant struct fields and APIs are compiled in.
     add_idf_sdkconfig_option("CONFIG_HTTPD_WS_SUPPORT", True)
+
+    # The SHIP server uses TLS (httpd_ssl_config_t, httpd_ssl_start) which lives
+    # in esp_https_server — excluded by ESPHome by default.
+    include_builtin_idf_component("esp_https_server")
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)

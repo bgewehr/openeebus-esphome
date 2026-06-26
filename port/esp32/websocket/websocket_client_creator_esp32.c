@@ -17,30 +17,27 @@
 
 #include <stdio.h>
 
-#include "src/ship/websocket/websocket_creator.h"
+#include "src/ship/websocket/websocket_client_creator.h"
 #include "src/ship/api/websocket_creator_interface.h"
 #include "src/ship/api/tls_certificate_interface.h"
-#include "src/ship/api/remote_service.h"
 #include "websocket_client_esp32.h"
 
 /**
  * @brief Create a WebSocket client creator for the ESP32 platform.
  *
- * @param remote        Remote SHIP service description (host, port, path)
+ * Replaces the upstream libwebsockets-based implementation with one
+ * based on esp_websocket_client.
+ *
+ * @param uri           WebSocket URI (e.g. "wss://host:port/ship/")
  * @param tls_cert      Our TLS client certificate
+ * @param remote_ski    Expected remote SKI for verification
  * @return              WebsocketCreatorObject*
  */
 WebsocketCreatorObject* WebsocketClientCreatorCreate(
-    const RemoteService*         remote,
-    const TlsCertificateObject*  tls_cert)
+    const char*                  uri,
+    const TlsCertificateObject*  tls_cert,
+    const char*                  remote_ski)
 {
-  /* Build wss://host:port/ship/ URI */
-  char uri[256];
-  snprintf(uri, sizeof(uri), "wss://%s:%d%s",
-           remote->host,
-           remote->port,
-           remote->path ? remote->path : "/ship/");
-
   return WebsocketClientCreatorEsp32Create(
       uri,
       TLS_CERTIFICATE_GET_CERTIFICATE(tls_cert),
