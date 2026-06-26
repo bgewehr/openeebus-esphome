@@ -30,7 +30,6 @@ extern "C" {
 }
 
 #include "port/esp32/websocket/websocket_server_esp32.h"
-#include "port/esp32/websocket/websocket_client_esp32.h"
 
 namespace esphome {
 namespace eebus_wp {
@@ -233,7 +232,8 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
   EgLpcSetFailsafeConsumptionActivePowerLimit(eg_lpc_, addr, &fs_limit);
 
   EebusDuration fs_duration;
-  fs_duration.seconds = failsafe_duration_s_;
+  memset(&fs_duration, 0, sizeof(fs_duration));
+  fs_duration.seconds = (int32_t)failsafe_duration_s_;
   EgLpcSetFailsafeDurationMinimum(eg_lpc_, addr, &fs_duration);
 
   /* Start sending heartbeat — K40RF requires this periodically.

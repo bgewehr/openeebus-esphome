@@ -31,6 +31,10 @@
 extern "C" {
 #include "src/service/api/eebus_service_interface.h"
 #include "src/service/api/eebus_service_config.h"
+#include "src/service/api/service_reader_interface.h"
+#include "src/spine/entity/entity_local.h"
+#include "src/spine/model/entity_types.h"
+#include "src/spine/model/electrical_connection_types.h"
 #include "src/ship/api/ship_node_reader_interface.h"
 #include "src/ship/model/types.h"
 #include "src/use_case/api/cs_lp_listener_interface.h"
@@ -168,7 +172,7 @@ class EebusLpcComponent : public Component {
 
   /* openeebus handles */
   EebusServiceObject* service_ {nullptr};
-  CsLpcObject*        cs_lpc_  {nullptr};
+  CsLpUseCaseObject*        cs_lpc_  {nullptr};
 
   /* Trigger lists */
   std::vector<LimitActiveTrigger*>    limit_active_triggers_;
