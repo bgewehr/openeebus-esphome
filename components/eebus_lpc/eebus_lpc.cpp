@@ -157,7 +157,7 @@ void EebusLpcComponent::loop() {
 
   /* Heartbeat watchdog: if paired and no heartbeat within timeout, apply failsafe */
   if (limit_active_ && !heartbeat_lost_ && last_heartbeat_ms_ > 0) {
-    if ((now - last_heartbeat_ms_) > kHeartbeatTimeoutMs) {
+    if ((now - last_heartbeat_ms_) > kHeartbeatTimeoutSeconds * 1000u) {
       ESP_LOGW(TAG, "Heartbeat lost — applying failsafe %.0f W", failsafe_limit_w_);
       heartbeat_lost_ = true;
       on_power_limit_receive(failsafe_limit_w_, true);
@@ -225,7 +225,7 @@ void EebusLpcComponent::on_remote_ski_disconnected(const char* ski) {
   pairing_window_open_ = false;
 
   if (limit_active_) {
-    limit_active_ = false; current_power_w_ = current_limit_w_ = 0.0f;
+    limit_active_ = false; current_limit_w_ = 0.0f;
     for (auto* t : limit_cleared_triggers_) t->trigger();
   }
   update_pairing_state_("Getrennt");
@@ -472,12 +472,12 @@ bool EebusLpcComponent::start_eebus_service_(
   EebusServiceConfigSetRegisterAutoAccept(cfg, remote_ski_.empty());
 
   /* ServiceReader vtable */
-  SERVICE_READER_INTERFACE(&service_reader_) = &kServiceReaderMethods;
+  SERVICE_READER_INTERFACE(&service_reader_.obj) = &kServiceReaderMethods;
   service_reader_.self = this;
 
   /* Create service — 4-argument signature */
   service_ = EebusServiceCreate(cfg, "EnergyManagementSystem", tls_cert,
-                                 SERVICE_READER_OBJECT(&service_reader_));
+                                 SERVICE_READER_OBJECT(&service_reader_.obj));
   EebusServiceConfigDelete(cfg);
   if (!service_) { ESP_LOGE(TAG, "EebusServiceCreate failed"); return false; }
 
@@ -508,10 +508,8 @@ bool EebusLpcComponent::start_eebus_service_(
       CS_LP_LISTENER_OBJECT(&lpc_listener_));
   if (!cs_lpc_) { ESP_LOGE(TAG, "CsLpcUseCaseCreate failed"); return false; }
 
-  EebusError err = EEBUS_SERVICE_START(service_);
-  if (err != kEebusErrorOk) {
-    ESP_LOGE(TAG, "EEBUS_SERVICE_START failed: %d", err); return false;
-  }
+  EEBUS_SERVICE_START(service_);
+  // EEBUS_SERVICE_START returns void in this version of openeebus
 
   last_heartbeat_ms_ = millis();
   return true;

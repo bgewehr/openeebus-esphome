@@ -171,14 +171,22 @@ class EebusLpcComponent : public Component {
   bool        pairing_window_open_{false}; /* true while waiting for user confirm */
 
   /* openeebus handles */
-  EebusServiceObject* service_ {nullptr};
-  CsLpUseCaseObject*        cs_lpc_  {nullptr};
+  EebusServiceObject*  service_       {nullptr};
+  CsLpUseCaseObject*   cs_lpc_        {nullptr};
+  EntityLocalObject*   local_entity_  {nullptr};  /* added: needed by start_eebus_service_ */
+
+  /* ServiceReader vtable storage (C struct, must outlive the service) */
+  struct ServiceReaderWrapper {
+    ServiceReaderObject obj;   /* must be first */
+    EebusLpcComponent*  self;
+  } service_reader_ {};
 
   /* Trigger lists */
   std::vector<LimitActiveTrigger*>    limit_active_triggers_;
   std::vector<LimitClearedTrigger*>   limit_cleared_triggers_;
   std::vector<PairingRequestTrigger*> pairing_request_triggers_;
 
+ public:  /* public so free C-linkage vtable functions can reinterpret_cast */
   /* -----------------------------------------------------------------------
    * C-compatible vtable objects — wrap back to this C++ instance.
    * Must be layout-compatible with the C struct (obj is first member).

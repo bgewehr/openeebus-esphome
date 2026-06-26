@@ -144,6 +144,7 @@ class EebusWpComponent : public Component {
     EebusWpComponent*   self;
   } service_reader_{};
 
+ public:  /* public so free C-linkage vtable functions can reinterpret_cast */
   struct EgListener {
     EgLpListenerObject obj;   /* must be first */
     EebusWpComponent*  self;

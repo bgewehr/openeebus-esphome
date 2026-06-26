@@ -430,11 +430,8 @@ bool EebusWpComponent::start_eebus_service_(
   if (!eg_lpc_) { ESP_LOGE(TAG, "EgLpcUseCaseCreate failed"); return false; }
 
   /* Start service — begins mDNS announcement and SHIP server */
-  EebusError err = EEBUS_SERVICE_START(service_);
-  if (err != kEebusErrorOk) {
-    ESP_LOGE(TAG, "EEBUS_SERVICE_START failed: %d", (int)err);
-    return false;
-  }
+  EEBUS_SERVICE_START(service_);
+  // EEBUS_SERVICE_START returns void in this version of openeebus
 
   pairing_state_ = "Suche K40RF via mDNS...";
   ESP_LOGI(TAG, "EEBus WP service started");
