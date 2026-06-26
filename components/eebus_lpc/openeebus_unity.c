@@ -5,8 +5,25 @@
 #define EEBUS_PLATFORM_FREERTOS 1
 #define EEBUS_PLATFORM_ESP32    1
 
-// openeebus core sources
-#include "C:/Users/bernd/OneDrive/Dokumente/Bernd/GitHub/esphome-hems/.esphome/external_components/b72b2cfd/openeebus/src/common/debug.c"
+// ESP32 replacement for src/common/debug.c:
+// The upstream file depends on libwebsockets (lwsl_timestamp, lwsl_hexdump_notice).
+// We provide a minimal implementation using ESP-IDF's esp_log instead.
+#include <stdarg.h>
+#include <stddef.h>
+#include <stdio.h>
+#include "esp_log.h"
+static const char* EEBUS_DBG_TAG = "openeebus";
+void DebugPrintf(const char* format, ...) {
+  va_list args;
+  va_start(args, format);
+  esp_log_writev(ESP_LOG_DEBUG, EEBUS_DBG_TAG, format, args);
+  va_end(args);
+}
+void DebugHexdump(void* data, size_t data_size) {
+  ESP_LOG_BUFFER_HEXDUMP(EEBUS_DBG_TAG, data, data_size, ESP_LOG_DEBUG);
+}
+
+// openeebus core sources (debug.c excluded — replaced above)
 #include "C:/Users/bernd/OneDrive/Dokumente/Bernd/GitHub/esphome-hems/.esphome/external_components/b72b2cfd/openeebus/src/common/eebus_bool/eebus_bool.c"
 #include "C:/Users/bernd/OneDrive/Dokumente/Bernd/GitHub/esphome-hems/.esphome/external_components/b72b2cfd/openeebus/src/common/eebus_data/eebus_data_base.c"
 #include "C:/Users/bernd/OneDrive/Dokumente/Bernd/GitHub/esphome-hems/.esphome/external_components/b72b2cfd/openeebus/src/common/eebus_data/eebus_data_bool.c"
