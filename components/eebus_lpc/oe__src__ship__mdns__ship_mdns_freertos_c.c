@@ -1,0 +1,4 @@
+// openeebus wrapper: src/ship/mdns/ship_mdns_freertos.c
+#define EEBUS_PLATFORM_FREERTOS 1
+#define EEBUS_PLATFORM_ESP32    1
+#include "src/ship/mdns/ship_mdns_freertos.c"
