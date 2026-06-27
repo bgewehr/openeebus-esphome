@@ -4,20 +4,20 @@
  */
 /**
  * @file eebus_wp.h
- * @brief ESPHome component: EEBus EG/LPC sender to Bosch K40RF gateway.
+ * @brief ESPHome component: EEBus EG/LPC sender to heat pump EG gateway.
  *
  * Heartbeat: openeebus drives the heartbeat automatically via its internal
  * FreeRTOS 1-second tick (DeviceLocal1sTickCallback → HEARTBEAT_MANAGER_TICK).
  * EgLpcStartHeartbeat() activates the HeartbeatManager; the timeout is set
  * at EntityLocalCreate() time (kHeartbeatTimeoutSeconds = 60 s).
- * K40RF raises a fault if no heartbeat is received within 2× the timeout.
+ * WP raises a fault if no heartbeat is received within 2× the timeout.
  *
  * API for YAML lambdas:
  *   id(hems_wp).set_limit(watts)     — send LPC limit now (min 4200 W)
  *   id(hems_wp).clear_limit()        — remove limit (full power)
  *   id(hems_wp).current_power_w()    — last MPC reading from WP (W)
- *   id(hems_wp).is_connected()       — K40RF connection state
- *   id(hems_wp).remote_ski()         — K40RF SKI
+ *   id(hems_wp).is_connected()       — WP connection state
+ *   id(hems_wp).remote_ski()         — Remote WP SKI
  */
 
 #pragma once
@@ -92,6 +92,7 @@ class EebusWpComponent : public Component {
   float       active_limit_w()  const { return active_limit_w_; }
   bool        heartbeat_ok()    const { return !heartbeat_alarm_; }
   std::string remote_ski()      const { return remote_ski_; }
+  std::string local_ski()       const { return local_ski_; }
   std::string pairing_state()   const { return pairing_state_; }
 
   /* Called from C vtable (public for WpServiceReader friend access) */
@@ -103,11 +104,14 @@ class EebusWpComponent : public Component {
   /* Public for ServiceReader vtable access */
   std::string pairing_state_ {};
   std::string remote_ski_    {};
+  std::string local_ski_     {};
+  void save_remote_ski_nvs_(const char* ski);
 
  protected:
   bool load_or_generate_cert_();
   bool store_cert_nvs_(const uint8_t* c, size_t cl, const uint8_t* k, size_t kl);
   bool load_cert_nvs_(uint8_t** c, size_t* cl, uint8_t** k, size_t* kl);
+  std::string load_remote_ski_nvs_();
   bool start_eebus_service_(const uint8_t* cert, size_t cl,
                              const uint8_t* key,  size_t kl);
 

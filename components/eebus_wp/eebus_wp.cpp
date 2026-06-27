@@ -22,6 +22,7 @@ extern "C" {
 #include "src/service/api/eebus_service_config.h"
 #include "src/service/api/service_reader_interface.h"
 #include "src/common/eebus_device_info.h"
+#include "src/ship/api/mdns_entry.h"
 #include "src/ship/tls_certificate/tls_certificate.h"
 #include "src/spine/entity/entity_local.h"
 #include "src/spine/model/entity_types.h"
@@ -34,12 +35,13 @@ extern "C" {
 namespace esphome {
 namespace eebus_wp {
 
-static const char* NVS_NS       = "eebus_wp";
-static const char* NVS_KEY_CERT = "cert_der";
-static const char* NVS_KEY_KEY  = "key_der";
+static const char* NVS_NS        = "eebus_wp";
+static const char* NVS_KEY_CERT  = "cert_der";
+static const char* NVS_KEY_KEY   = "key_der";
+static const char* NVS_KEY_SKI   = "remote_ski";
 
 /* SPINE spec: EG sends heartbeat every kHeartbeatTimeoutSeconds.
- * K40RF expects a heartbeat within this window — if missed it raises a fault.
+ * WP expects a heartbeat within this window — if missed it raises a fault.
  * 60 s matches the openeebus reference HEMS example. */
 static const uint32_t kHeartbeatTimeoutSeconds = 60;
 
@@ -61,7 +63,7 @@ static void SR_OnRemoteSkiConnected(
 {
   auto* r = reinterpret_cast<WpServiceReader*>(o);
   ESP_LOGI("eebus_wp", "Remote SKI connected: %s", ski);
-  r->self->pairing_state_ = "Verbinde K40RF: " + std::string(ski);
+  r->self->pairing_state_ = "Verbinde WP: " + std::string(ski);
 }
 
 static void SR_OnRemoteSkiDisconnected(
@@ -73,7 +75,24 @@ static void SR_OnRemoteSkiDisconnected(
 }
 
 static void SR_OnRemoteServicesUpdate(
-    ServiceReaderObject*, EebusServiceObject*, const Vector*) {}
+    ServiceReaderObject* o, EebusServiceObject* svc, const Vector* entries)
+{
+  auto* r = reinterpret_cast<WpServiceReader*>(o);
+  if (!r->self->remote_ski_.empty()) return;  /* already targeting a specific device */
+
+  size_t n = VectorGetSize(entries);
+  for (size_t i = 0; i < n; i++) {
+    const MdnsEntry* entry = (const MdnsEntry*)VectorGetElement(entries, i);
+    const char* ski = MdnsEntryGetSki(entry);
+    if (!ski || ski[0] == '\0') continue;
+    if (r->self->local_ski_ == ski) continue;  /* skip ourselves */
+    ESP_LOGI("eebus_wp", "mDNS: discovered WP ski=%s host=%s, registering",
+             ski, MdnsEntryGetHost(entry) ? MdnsEntryGetHost(entry) : "?");
+    EEBUS_SERVICE_REGISTER_REMOTE_SKI(svc, ski, true);
+    r->self->pairing_state_ = "mDNS: Verbinde " + std::string(ski);
+    break;  /* register only the first discovered candidate */
+  }
+}
 
 static void SR_OnShipIdUpdate(
     ServiceReaderObject*, const char* ski, const char* ship_id)
@@ -89,6 +108,12 @@ static void SR_OnShipStateUpdate(
   if (state == kSmeStateApproved || state == kDataExchange) {
     r->self->remote_ski_ = ski;
     r->self->pairing_state_ = "Gepairt: " + std::string(ski);
+  }
+  if (state == kDataExchange) {
+    /* Persist the peer SKI to NVS so pairing survives reboots.
+     * kDataExchange fires exactly once per successful SHIP connection. */
+    r->self->save_remote_ski_nvs_(ski);
+    ESP_LOGI("eebus_wp", "WP data exchange active — SKI persisted: %s", ski);
   }
 }
 
@@ -114,7 +139,14 @@ static const ServiceReaderInterface kServiceReaderMethods = {
  * ====================================================================== */
 
 void EebusWpComponent::setup() {
-  ESP_LOGI(TAG, "Setting up EEBus WP controller (Bosch K40RF)");
+  ESP_LOGI(TAG, "Setting up EEBus WP controller");
+
+  /* Load paired K40RF SKI from NVS if not set in YAML secrets */
+  if (remote_ski_.empty()) {
+    remote_ski_ = load_remote_ski_nvs_();
+    if (!remote_ski_.empty())
+      ESP_LOGI(TAG, "Loaded paired WP SKI from NVS: %s", remote_ski_.c_str());
+  }
 
   uint8_t* cert = nullptr; size_t cl = 0;
   uint8_t* key  = nullptr; size_t kl = 0;
@@ -144,15 +176,15 @@ void EebusWpComponent::setup() {
 void EebusWpComponent::loop() {
   if (!service_ || !eg_lpc_) return;
 
-  /* Verify the heartbeat is being acknowledged by K40RF.
+  /* Verify the heartbeat is being acknowledged by WP.
    * EgLpcIsHeartbeatWithinDuration() returns false if no heartbeat ACK
    * was received within 2× kHeartbeatTimeoutSeconds.
    * In that case the connection is likely stale — log and flag. */
   if (connected_ && !EgLpcIsHeartbeatWithinDuration(eg_lpc_)) {
     if (!heartbeat_alarm_) {
-      ESP_LOGW(TAG, "K40RF heartbeat overdue — connection may be stale");
+      ESP_LOGW(TAG, "WP heartbeat overdue \xe2\x80\x94 connection may be stale");
       heartbeat_alarm_ = true;
-      pairing_state_ = "Heartbeat-Ausfall — K40RF antwortet nicht";
+      pairing_state_ = "Heartbeat-Ausfall \xe2\x80\x94 WP antwortet nicht";
     }
   } else {
     heartbeat_alarm_ = false;
@@ -164,9 +196,9 @@ void EebusWpComponent::loop() {
  * ====================================================================== */
 
 void EebusWpComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "EEBus WP Component (Bosch K40RF):");
+  ESP_LOGCONFIG(TAG, "EEBus WP Component::");
   ESP_LOGCONFIG(TAG, "  SHIP Port:      %d",   ship_port_);
-  ESP_LOGCONFIG(TAG, "  K40RF SKI:      %s",   remote_ski_.empty() ? "(auto-discover)" : remote_ski_.c_str());
+  ESP_LOGCONFIG(TAG, "  Remote SKI:      %s",   remote_ski_.empty() ? "(auto-discover)" : remote_ski_.c_str());
   ESP_LOGCONFIG(TAG, "  Connected:      %s",   connected_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Heartbeat:      every %u s", kHeartbeatTimeoutSeconds);
   ESP_LOGCONFIG(TAG, "  Failsafe:       %.0f W / %u s", failsafe_limit_w_, failsafe_duration_s_);
@@ -178,11 +210,11 @@ void EebusWpComponent::dump_config() {
 
 void EebusWpComponent::set_limit(float watts) {
   if (!connected_ || !have_remote_entity_ || !eg_lpc_) {
-    ESP_LOGW(TAG, "set_limit(%.0f W) — K40RF not connected", watts);
+    ESP_LOGW(TAG, "set_limit(%.0f W) — WP not connected", watts);
     return;
   }
 
-  /* §14a: never limit below 4200 W (Bosch K40RF also enforces this internally) */
+  /* §14a: never limit below 4200 W (WP also enforces this internally) */
   if (watts > 0.0f && watts < 4200.0f) {
     ESP_LOGW(TAG, "Clamping %.0f W → 4200 W (§14a minimum)", watts);
     watts = 4200.0f;
@@ -217,14 +249,14 @@ void EebusWpComponent::set_limit(float watts) {
  * ====================================================================== */
 
 void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
-  ESP_LOGI(TAG, "K40RF entity connected");
+  ESP_LOGI(TAG, "WP entity connected");
   connected_          = true;
   heartbeat_alarm_    = false;
   have_remote_entity_ = true;
   if (addr) remote_entity_addr_ = *addr;
-  pairing_state_      = "Verbunden mit K40RF";
+  pairing_state_      = "Verbunden mit WP";
 
-  /* Configure failsafe on K40RF: if HEMS heartbeat stops, WP falls back
+  /* Configure failsafe on WP: if HEMS heartbeat stops, WP falls back
    * to failsafe_limit_w_ for failsafe_duration_s_ seconds, then normal. */
   ScaledValue fs_limit;
   fs_limit.value = (int64_t)failsafe_limit_w_;
@@ -236,7 +268,7 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
   fs_duration.seconds = (int32_t)failsafe_duration_s_;
   EgLpcSetFailsafeDurationMinimum(eg_lpc_, addr, &fs_duration);
 
-  /* Start sending heartbeat — K40RF requires this periodically.
+  /* Start sending heartbeat — WP requires this periodically.
    * openeebus drives the heartbeat automatically via its internal
    * FreeRTOS 1-second tick timer (device_local.c DeviceLocal1sTickCallback).
    * EgLpcStartHeartbeat() activates the HeartbeatManager for this entity. */
@@ -247,11 +279,11 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
 }
 
 void EebusWpComponent::on_entity_disconnect(const EntityAddressType* /*addr*/) {
-  ESP_LOGW(TAG, "K40RF entity disconnected");
+  ESP_LOGW(TAG, "WP entity disconnected");
   connected_          = false;
   have_remote_entity_ = false;
   active_limit_w_     = 0.0f;
-  pairing_state_      = "Getrennt — suche K40RF...";
+  pairing_state_      = "Getrennt — suche WP...";
 
   if (eg_lpc_) EgLpcStopHeartbeat(eg_lpc_);
 
@@ -259,7 +291,7 @@ void EebusWpComponent::on_entity_disconnect(const EntityAddressType* /*addr*/) {
 }
 
 void EebusWpComponent::on_power_limit_ack(float watts, bool active) {
-  ESP_LOGD(TAG, "K40RF ACK limit %.0f W active=%s", watts, active ? "yes" : "no");
+  ESP_LOGD(TAG, "WP ACK limit %.0f W active=%s", watts, active ? "yes" : "no");
 }
 
 void EebusWpComponent::on_power_reading(float watts) {
@@ -302,6 +334,28 @@ bool EebusWpComponent::load_cert_nvs_(
   nvs_close(h);
   if (!ok) { free(*c); free(*k); *c = *k = nullptr; }
   return ok;
+}
+
+void EebusWpComponent::save_remote_ski_nvs_(const char* ski) {
+  nvs_handle_t h;
+  if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+  nvs_set_str(h, NVS_KEY_SKI, ski);
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+std::string EebusWpComponent::load_remote_ski_nvs_() {
+  nvs_handle_t h;
+  if (nvs_open(NVS_NS, NVS_READONLY, &h) != ESP_OK) return {};
+  size_t len = 0;
+  std::string result;
+  if (nvs_get_str(h, NVS_KEY_SKI, nullptr, &len) == ESP_OK && len > 1) {
+    result.resize(len);
+    nvs_get_str(h, NVS_KEY_SKI, &result[0], &len);
+    result.resize(len - 1);  /* strip NUL terminator included in len */
+  }
+  nvs_close(h);
+  return result;
 }
 
 bool EebusWpComponent::load_or_generate_cert_() {
@@ -372,6 +426,7 @@ bool EebusWpComponent::start_eebus_service_(
   if (!tls_cert) { ESP_LOGE(TAG, "TlsCertificateParse failed"); return false; }
 
   const char* local_ski = TLS_CERTIFICATE_GET_SKI(tls_cert);
+  if (local_ski) local_ski_ = local_ski;
   ESP_LOGI(TAG, "WP-EG local SKI: %s", local_ski ? local_ski : "(null)");
 
   /* Build service config */
@@ -390,7 +445,7 @@ bool EebusWpComponent::start_eebus_service_(
   SERVICE_READER_INTERFACE(&service_reader_) = &kServiceReaderMethods;
   service_reader_.self = this;
 
-  /* Register K40RF SKI if configured */
+  /* Register remote WP SKI if configured */
   // (done after service start via EEBUS_SERVICE_REGISTER_REMOTE_SKI)
 
   /* Create service — correct 4-argument signature from eebus_service.h */
@@ -401,6 +456,12 @@ bool EebusWpComponent::start_eebus_service_(
 
   if (!remote_ski_.empty()) {
     EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, remote_ski_.c_str(), true);
+  } else {
+    /* No known remote SKI: enter pairing mode so incoming connections are accepted.
+     * ship_node.c ShipNodeOnWebsocketServerConnectionCallback now calls
+     * SHIP_NODE_READER_IS_WAITING_FOR_TRUST_ALLOWED which reads this flag. */
+    EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, true);
+    ESP_LOGI(TAG, "WP pairing mode active — will accept first device");
   }
 
   /* Get local SPINE device */
@@ -409,7 +470,7 @@ bool EebusWpComponent::start_eebus_service_(
 
   /* Create local CEM entity with heartbeat timeout.
    * This is the critical step — without a proper entity the heartbeat
-   * manager is never created and K40RF raises a connection fault. */
+   * manager is never created and WP raises a connection fault. */
   uint32_t entity_id = 1;
   local_entity_ = EntityLocalCreate(
       device_local,
@@ -427,11 +488,14 @@ bool EebusWpComponent::start_eebus_service_(
   eg_lpc_ = EgLpcUseCaseCreate(local_entity_, EG_LP_LISTENER_OBJECT(&eg_listener_));
   if (!eg_lpc_) { ESP_LOGE(TAG, "EgLpcUseCaseCreate failed"); return false; }
 
+  /* Register entity with device so it is advertised via SPINE/mDNS */
+  DEVICE_LOCAL_ADD_ENTITY(device_local, local_entity_);
+
   /* Start service — begins mDNS announcement and SHIP server */
   EEBUS_SERVICE_START(service_);
   // EEBUS_SERVICE_START returns void in this version of openeebus
 
-  pairing_state_ = "Suche K40RF via mDNS...";
+  pairing_state_ = "Suche WP via mDNS...";
   ESP_LOGI(TAG, "EEBus WP service started");
   return true;
 }
