@@ -1,0 +1,6 @@
+MaMgcpListener
+void Destruct()
+void OnRemoteEntityConnect(const EntityAddressType* entity_addr)
+void OnRemoteEntityDisconnect(const EntityAddressType* entity_addr)
+void OnMeasurementReceive(GcpMeasurementNameId name_id, const ScaledValue* measurement_value, const EntityAddressType* remote_entity_addr)
+void OnPvCurtailmentLimitFactorReceive(const ScaledValue* value, const EntityAddressType* remote_entity_addr)

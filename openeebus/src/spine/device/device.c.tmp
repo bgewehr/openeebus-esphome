@@ -1,0 +1,6 @@
+Device
+void Destruct()
+const char* GetAddress() const
+const DeviceTypeType* GetDeviceType() const
+const NetworkManagementFeatureSetType* GetFeatureSet() const
+const NodeManagementDestinationDataType* CreateDestinationData() const

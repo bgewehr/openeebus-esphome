@@ -14,6 +14,7 @@ import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
+from esphome.components import socket
 from esphome.const import CONF_ID, CONF_TRIGGER_ID
 
 DEPENDENCIES = ["network", "esp32"]
@@ -40,24 +41,34 @@ CONF_ON_LIMIT_ACTIVE    = "on_limit_active"
 CONF_ON_LIMIT_CLEARED   = "on_limit_cleared"
 CONF_ON_PAIRING_REQUEST = "on_pairing_request"
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(EebusLpcComponent),
-    cv.Optional(CONF_SHIP_PORT,      default=4712):          cv.port,
-    cv.Optional(CONF_REMOTE_SKI,     default=""):            cv.string,
-    cv.Optional(CONF_DEVICE_BRAND,   default="DIY"):         cv.string_strict,
-    cv.Optional(CONF_DEVICE_TYPE,    default="HEMS"):        cv.string_strict,
-    cv.Optional(CONF_DEVICE_MODEL,   default="ESP32-HEMS-14a"): cv.string_strict,
-    cv.Optional(CONF_FAILSAFE_LIMIT, default=4200.0):        cv.positive_float,
-    cv.Optional(CONF_ON_LIMIT_ACTIVE): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(LimitActiveTrigger),
-    }),
-    cv.Optional(CONF_ON_LIMIT_CLEARED): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(LimitClearedTrigger),
-    }),
-    cv.Optional(CONF_ON_PAIRING_REQUEST): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(PairingRequestTrigger),
-    }),
-}).extend(cv.COMPONENT_SCHEMA)
+def _consume_eebus_lpc_sockets(config):
+    # httpd_ssl instance: 1 HTTPS listen + 2 active WS connections + 1 ctrl_port = 4 sockets
+    socket.consume_sockets(1, "eebus_lpc", socket.SocketType.TCP_LISTEN)(config)
+    socket.consume_sockets(3, "eebus_lpc")(config)
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema({
+        cv.GenerateID(): cv.declare_id(EebusLpcComponent),
+        cv.Optional(CONF_SHIP_PORT,      default=4712):          cv.port,
+        cv.Optional(CONF_REMOTE_SKI,     default=""):            cv.string,
+        cv.Optional(CONF_DEVICE_BRAND,   default="DIY"):         cv.string_strict,
+        cv.Optional(CONF_DEVICE_TYPE,    default="HEMS"):        cv.string_strict,
+        cv.Optional(CONF_DEVICE_MODEL,   default="ESP32-HEMS-14a"): cv.string_strict,
+        cv.Optional(CONF_FAILSAFE_LIMIT, default=4200.0):        cv.positive_float,
+        cv.Optional(CONF_ON_LIMIT_ACTIVE): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(LimitActiveTrigger),
+        }),
+        cv.Optional(CONF_ON_LIMIT_CLEARED): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(LimitClearedTrigger),
+        }),
+        cv.Optional(CONF_ON_PAIRING_REQUEST): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(PairingRequestTrigger),
+        }),
+    }).extend(cv.COMPONENT_SCHEMA),
+    _consume_eebus_lpc_sockets,
+)
 
 
 def _generate_unity_build(component_dir, repo_root):

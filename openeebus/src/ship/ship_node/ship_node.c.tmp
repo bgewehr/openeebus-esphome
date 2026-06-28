@@ -1,0 +1,6 @@
+ShipNode
+void Start()
+void Stop()
+void RegisterRemoteSki(const char* ski, bool is_trusted)
+void UnregisterRemoteSki(const char* ski)
+void CancelPairingWithSki(const char* ski)

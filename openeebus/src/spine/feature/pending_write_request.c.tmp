@@ -1,0 +1,10 @@
+PendingWriteRequest
+void Destruct()
+const char* GetSki()
+uint64_t GetMessageCounter()
+EebusError GetMessage(FeatureLocalObject* fl, Message* msg)
+uint64_t GetNumberOfApprovals()
+void AddApproval()
+uint32_t GetRemainingTime()
+void UpdateRemainingTime()
+bool HasExpired()

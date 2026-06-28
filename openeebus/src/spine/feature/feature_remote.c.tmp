@@ -1,0 +1,9 @@
+FeatureRemote
+DeviceRemoteObject* GetDevice() const
+EntityRemoteObject* GetEntity() const
+const void* GetData(FunctionType function_type) const
+void* DataCopy(FunctionType fcn_type) const
+EebusError UpdateData(FunctionType function_type, const void* new_data, const FilterType* filter_partial, const FilterType* filter_delete, bool persist)
+void SetFunctionOperations(const FunctionPropertyType* const* supported_functions, size_t supported_functions_size)
+void SetMaxResponseDelay(uint32_t max_delay)
+uint32_t GetMaxResponseDelay() const

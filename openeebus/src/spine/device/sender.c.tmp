@@ -1,0 +1,12 @@
+Sender
+void Destruct()
+EebusError Read(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr, const CmdType* cmd)
+EebusError Reply(const HeaderType* request_header, const FeatureAddressType* sender_addr, const CmdType* cmd)
+EebusError Notify(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr, const CmdType* cmd)
+EebusError Write(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr, const CmdType* cmd)
+EebusError CallSubscribe(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr, FeatureTypeType server_feature_type)
+EebusError CallUnsubscribe(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr)
+EebusError CallBind(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr, FeatureTypeType server_feature_type)
+EebusError CallUnbind(const FeatureAddressType* sender_addr, const FeatureAddressType* dest_addr)
+EebusError ResultSuccess(const HeaderType* request_header, const FeatureAddressType* sender_addr)
+EebusError ResultError(const HeaderType* request_header, const FeatureAddressType* sender_addr, const ErrorType* err)

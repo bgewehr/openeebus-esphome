@@ -1,0 +1,5 @@
+UseCase
+void Destruct()
+bool IsEntityCompatible(const EntityRemoteObject* remote_entity) const
+bool IsUseCaseCompatible(const UseCaseFilterType* use_case_filter) const
+EntityRemoteObject* GetRemoteEntityWithAddress(const EntityAddressType* remote_entity_addr) const

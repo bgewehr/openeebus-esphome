@@ -1,0 +1,4 @@
+ShipMessageDeserialize
+void Destruct()
+MsgValueType GetValueType() const
+void* GetValue() const

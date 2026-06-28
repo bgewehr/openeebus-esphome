@@ -1,0 +1,7 @@
+Websocket
+void Destruct()
+int32_t Write(const uint8_t* msg, size_t msg_size)
+void Close(int32_t close_code, const char* reason)
+bool IsClosed() const
+int32_t GetCloseError() const
+void ScheduleWrite()

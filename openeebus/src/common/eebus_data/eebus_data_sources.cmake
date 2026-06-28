@@ -1,0 +1,36 @@
+
+set(EEBUS_DATA_SOURCES 
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_date_time.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_base.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_bool.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_choice.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_choice_root.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_container.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_enum.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_list.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_numeric.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_sequence.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_simple.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_string.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_stub.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_tag.c
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_util.c
+)
+
+set(EEBUS_DATA_HEADERS 
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_date_time.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_base.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_bool.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_choice.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_choice_root.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_container.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_enum.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_list.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_numeric.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_sequence.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_simple.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_string.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_stub.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_tag.h
+  ${CMAKE_CURRENT_LIST_DIR}/eebus_data_util.h
+)

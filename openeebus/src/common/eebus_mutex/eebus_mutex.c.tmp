@@ -1,0 +1,4 @@
+EebusMutex
+void Destruct()
+void Lock()
+void Unlock()

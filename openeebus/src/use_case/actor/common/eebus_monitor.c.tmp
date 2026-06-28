@@ -1,0 +1,6 @@
+EebusMonitor
+void Destruct()
+EebusMeasurementMonitorNameId GetName() const
+EebusError Configure(MeasurementServer* msrv, ElectricalConnectionServer* ecsrv, ElectricalConnectionIdType ec_id, MeasurementConstraintsListDataType* constraints)
+EebusMeasurementObject* GetMeasurement(EebusMeasurementNameId name_id) const
+EebusError FlushMeasurementCache(MeasurementListDataType* list)

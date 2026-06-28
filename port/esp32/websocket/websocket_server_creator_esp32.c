@@ -9,11 +9,12 @@
  */
 /**
  * @file websocket_server_creator_esp32.c
- * @brief Bridges the openeebus websocket_creator_interface to the ESP32
- *        httpd-based WebSocket server.
+ * @brief Stub for the openeebus WebsocketServerCreatorCreate factory.
  *
- * openeebus calls WebsocketCreatorCreate() to obtain a server creator.
- * This file provides that factory using the ESP32 implementation.
+ * In the ESP32 port, server-side WebSocket creators are created directly
+ * inside http_server_esp32.c (ShipWsHandler) when an incoming connection
+ * is accepted — WebsocketServerCreatorCreate() is never called from the
+ * ESP32 code path.  This stub satisfies the linker symbol requirement.
  */
 
 #include "src/ship/websocket/websocket_creator.h"
@@ -21,23 +22,12 @@
 #include "src/ship/api/tls_certificate_interface.h"
 #include "websocket_server_esp32.h"
 
-/**
- * @brief Create a WebSocket server creator for the ESP32 platform.
- *
- * Called by openeebus SHIP layer when initialising as a server (CS role).
- *
- * @param port          TCP port to listen on (SHIP default 4712)
- * @param tls_cert      openeebus TLS certificate object
- * @return              WebsocketCreatorObject* for use by ShipNode
- */
 WebsocketCreatorObject* WebsocketServerCreatorCreate(
     uint16_t                     port,
     const TlsCertificateObject*  tls_cert)
 {
-  return WebsocketServerCreatorEsp32Create(
-      port,
-      TLS_CERTIFICATE_GET_CERTIFICATE(tls_cert),
-      TLS_CERTIFICATE_GET_CERTIFICATE_SIZE(tls_cert),
-      TLS_CERTIFICATE_GET_PRIVATE_KEY(tls_cert),
-      TLS_CERTIFICATE_GET_PRIVATE_KEY_SIZE(tls_cert));
+  (void)port;
+  (void)tls_cert;
+  /* Not used in ESP32 path — server creators are built in ShipWsHandler. */
+  return NULL;
 }

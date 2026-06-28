@@ -1,0 +1,8 @@
+ServiceReader
+void Destruct()
+void OnRemoteSkiConnected(ServiceObject* service, const char* ski)
+void OnRemoteSkiDisconnected(ServiceObject* service, const char* ski)
+void OnRemoteServicesUpdate(ServiceObject* service, const Vector* entries)
+void OnShipIdUpdate(const char* ski, const char* shipd_id)
+void OnShipStateUpdate(const char* ski, SmeState state)
+bool IsWaitingForTrustAllowed(const char* ski) const

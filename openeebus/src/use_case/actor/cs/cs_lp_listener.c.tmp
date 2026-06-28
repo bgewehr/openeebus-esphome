@@ -1,0 +1,6 @@
+CsLpListener
+void Destruct()
+void OnPowerLimitReceive(const ScaledValue* power_limit, const DurationType* duration, bool is_active)
+void OnFailsafePowerLimitReceive(const ScaledValue* power_limit)
+void OnFailsafeDurationReceive(const DurationType* duration)
+void OnHeartbeatReceive(uint64_t heartbeat_counter)

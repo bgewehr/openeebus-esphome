@@ -1,0 +1,12 @@
+EebusService
+void Start()
+void Stop()
+const ServiceDetails* GetLocalService() const
+DeviceLocalObject* GetLocalDevice() const
+const ConnectionState* GetConnectionStateWithSki(const char* ski) const
+const ServiceDetails* GetRemoteServiceDetailsWithSki(const char* ski) const
+void RegisterRemoteSki(const char* ski, bool enable)
+void UnregisterRemoteSki(const char* ski)
+void CancelPairingWithSki(const char* ski)
+void SetPairingPossible(bool is_pairing_possible)
+const char* GetLocalSki()

@@ -25,6 +25,7 @@ import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
+from esphome.components import socket
 from esphome.const import CONF_ID, CONF_TRIGGER_ID
 
 DEPENDENCIES = ["network", "esp32"]
@@ -49,25 +50,35 @@ CONF_ON_WP_CONNECTED     = "on_wp_connected"
 CONF_ON_WP_DISCONNECTED  = "on_wp_disconnected"
 CONF_ON_POWER_READING    = "on_power_reading"
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(EebusWpComponent),
-    cv.Optional(CONF_SHIP_PORT,           default=4712):    cv.port,
-    cv.Optional(CONF_REMOTE_SKI,          default=""):      cv.string,
-    cv.Optional(CONF_DEVICE_BRAND,        default="DIY"):   cv.string_strict,
-    cv.Optional(CONF_DEVICE_TYPE,         default="HEMS"):  cv.string_strict,
-    cv.Optional(CONF_DEVICE_MODEL,        default="ESP32-HEMS-14a"): cv.string_strict,
-    cv.Optional(CONF_FAILSAFE_LIMIT_W,    default=4200.0):  cv.positive_float,
-    cv.Optional(CONF_FAILSAFE_DURATION_S, default=7200):    cv.positive_int,  # 2h default
-    cv.Optional(CONF_ON_WP_CONNECTED): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpConnectedTrigger),
-    }),
-    cv.Optional(CONF_ON_WP_DISCONNECTED): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpDisconnectedTrigger),
-    }),
-    cv.Optional(CONF_ON_POWER_READING): automation.validate_automation({
-        cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpPowerReadingTrigger),
-    }),
-}).extend(cv.COMPONENT_SCHEMA)
+def _consume_eebus_wp_sockets(config):
+    # httpd_ssl instance: 1 HTTPS listen + 2 active WS connections + 1 ctrl_port = 4 sockets
+    socket.consume_sockets(1, "eebus_wp", socket.SocketType.TCP_LISTEN)(config)
+    socket.consume_sockets(3, "eebus_wp")(config)
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema({
+        cv.GenerateID(): cv.declare_id(EebusWpComponent),
+        cv.Optional(CONF_SHIP_PORT,           default=4712):    cv.port,
+        cv.Optional(CONF_REMOTE_SKI,          default=""):      cv.string,
+        cv.Optional(CONF_DEVICE_BRAND,        default="DIY"):   cv.string_strict,
+        cv.Optional(CONF_DEVICE_TYPE,         default="HEMS"):  cv.string_strict,
+        cv.Optional(CONF_DEVICE_MODEL,        default="ESP32-HEMS-14a"): cv.string_strict,
+        cv.Optional(CONF_FAILSAFE_LIMIT_W,    default=4200.0):  cv.positive_float,
+        cv.Optional(CONF_FAILSAFE_DURATION_S, default=7200):    cv.positive_int,  # 2h default
+        cv.Optional(CONF_ON_WP_CONNECTED): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpConnectedTrigger),
+        }),
+        cv.Optional(CONF_ON_WP_DISCONNECTED): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpDisconnectedTrigger),
+        }),
+        cv.Optional(CONF_ON_POWER_READING): automation.validate_automation({
+            cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(WpPowerReadingTrigger),
+        }),
+    }).extend(cv.COMPONENT_SCHEMA),
+    _consume_eebus_wp_sockets,
+)
 
 
 async def to_code(config):

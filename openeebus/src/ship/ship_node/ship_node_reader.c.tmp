@@ -1,0 +1,9 @@
+ShipNodeReader
+void Destruct();
+void OnRemoteSkiConnected(const char* ski);
+void OnRemoteSkiDisconnected(const char* ski);
+DataReaderObject* SetupRemoteDevice(const char* ski, DataWriterObject* data_writer);
+void OnRemoteServicesUpdate(const Vector* entries);
+void OnShipIdUpdate(const char* ski, const char* ship_id);
+void OnShipStateUpdate(const char* ski, SmeState state);
+bool IsWaitingForTrustAllowed(const char* ski);

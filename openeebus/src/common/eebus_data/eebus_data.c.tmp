@@ -1,0 +1,23 @@
+EebusData
+void* CreateEmpty(void* base_addr) const
+void* Parse(const char* s) const
+char* PrintUnformatted(const void* base_addr) const
+EebusError FromJsonObjectItem(void* base_addr, const JsonObject* json_item) const
+EebusError FromJsonObject(void* base_addr, const JsonObject* json_obj, bool is_root) const
+EebusError ToJsonObjectItem(const void* base_addr, JsonObject** json_item) const
+EebusError ToJsonObject(const void* base_addr, JsonObject* json_obj, bool is_root) const
+EebusError Copy(const void* base_addr, void* dst_base_addr) const
+EebusError CopyMatching(const void* base_addr, void* dst_base_addr, const void* data_to_match_base_addr) const
+bool Compare(const void* a_base_addr, const EebusDataCfg* b_cfg, const void* b_base_addr) const
+bool IsNull(const void* base_addr) const
+bool IsEmpty(const void* base_addr) const
+bool HasIdentifiers(const void* base_addr) const
+bool SelectorsMatch(const void* base_addr, const EebusDataCfg* selectors_cfg, const void* selectors_base_addr) const
+bool IdentifiersMatch(const void* base_addr, const void* src_base_addr) const
+EebusError ReadElements(const void* base_addr, void* dst_base_addr, const EebusDataCfg* elements_cfg, const void* elements_base_addr) const
+EebusError Write(void* base_addr, const void* src_base_addr) const
+EebusError WriteElements(void* base_addr, const void* src_base_addr) const
+EebusError WritePartial(void* base_addr, const void* src_base_addr, const EebusDataCfg* selectors_cfg, const void* selectors_base_addr, SelectorsMatcher selectors_matcher) const
+void DeleteElements(void* base_addr, const EebusDataCfg* elements_cfg, const void* elements_base_addr) const
+void DeletePartial(void* base_addr, const EebusDataCfg* selectors_cfg, const void* selectors_base_addr, SelectorsMatcher selectors_matcher, const EebusDataCfg* elements_cfg, const void* elements_base_addr) const
+void Delete(void* base_addr) const

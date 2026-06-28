@@ -1,0 +1,3 @@
+# Generated per-source wrapper files produced by _generate_unity_build() in __init__.py.
+# Regenerated on every compile — do not commit.
+oe__*.c

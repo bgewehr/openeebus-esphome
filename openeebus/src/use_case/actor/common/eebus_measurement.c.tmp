@@ -1,0 +1,8 @@
+EebusMeasurement
+void Destruct()
+EebusMeasurementNameId GetName() const
+EebusError GetDataValue(MeasurementServer* msrv, ScaledValue* measurement_value) const
+const MeasurementConstraintsDataType* GetConstraints() const
+EebusError Configure(MeasurementServer* msrv, ElectricalConnectionServer* ecsrv, ElectricalConnectionIdType electrical_connection_id)
+EebusError SetDataCache(const ScaledValue* measured_value, const EebusDateTime* timestamp, const MeasurementValueStateType* value_state, const EebusDateTime* start_time, const EebusDateTime* end_time)
+MeasurementDataType* ReleaseDataCache()

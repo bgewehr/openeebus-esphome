@@ -1,0 +1,8 @@
+SubscriptionManager
+void Destruct()
+EebusError AddSubscription(DeviceRemoteObject* remote_device, const SubscriptionManagementRequestCallType* data)
+EebusError RemoveSubscription(DeviceRemoteObject* remote_device, const SubscriptionManagementDeleteCallType* data)
+void RemoveDeviceSubscriptions(DeviceRemoteObject* remote_device)
+void RemoveEntitySubscriptions(EntityRemoteObject* remote_entity)
+void Publish(const FeatureAddressType* feature_addr, const CmdType* cmd) const
+NodeManagementSubscriptionDataType* CreateSubscriptionData(DeviceRemoteObject* remote_device) const

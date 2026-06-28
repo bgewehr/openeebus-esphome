@@ -1,0 +1,9 @@
+Feature
+void Destruct()
+const FeatureAddressType* GetAddress() const
+FeatureTypeType GetType() const
+RoleType GetRole() const
+const OperationsObject* GetFunctionOperations(FunctionType fcn_type) const
+const char*	GetDescription() const
+void SetDescription(const char* description)
+const char* ToString() const

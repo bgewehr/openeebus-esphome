@@ -1,0 +1,3 @@
+ShipMessageSerialize
+void Destruct()
+MessageBuffer* GetBuffer() const

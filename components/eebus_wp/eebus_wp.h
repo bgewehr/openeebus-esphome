@@ -86,6 +86,11 @@ class EebusWpComponent : public Component {
   void set_limit(float watts);
   void clear_limit() { set_limit(0.0f); }
 
+  /* Pairing management */
+  void enter_pairing_mode();
+  void forget_pairing();
+  bool is_pairing_mode() const { return pairing_mode_; }
+
   /* State accessors */
   bool        is_connected()    const { return connected_; }
   float       current_power_w() const { return current_power_w_; }
@@ -105,7 +110,9 @@ class EebusWpComponent : public Component {
   std::string pairing_state_ {};
   std::string remote_ski_    {};
   std::string local_ski_     {};
+  bool        pairing_mode_  {false};
   void save_remote_ski_nvs_(const char* ski);
+  void on_ship_data_exchange_(const char* ski);  /* called by vtable on kDataExchange */
 
  protected:
   bool load_or_generate_cert_();

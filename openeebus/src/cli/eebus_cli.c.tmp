@@ -1,0 +1,9 @@
+EebusCli
+void Destruct()
+void SetCsLpc(CsLpUseCaseObject* cs_lpc_use_case)
+void SetCsLpp(CsLpUseCaseObject* cs_lpp_use_case)
+void SetEgLpc(EgLpUseCaseObject* eg_lpc_use_case, const EntityAddressType* remote_entity_address)
+void SetEgLpp(EgLpUseCaseObject* eg_lpp_use_case, const EntityAddressType* remote_entity_address)
+void SetMuMpc(MuMpcUseCaseObject* mu_mpc_use_case)
+void SetMaMpc(MaMpcUseCaseObject* ma_mpc_use_case, const EntityAddressType* remote_entity_address)
+void HandleCmd(char* cmd) const

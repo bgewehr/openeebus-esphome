@@ -1,0 +1,3 @@
+DataReader
+void Destruct()
+void HandleMessage(MessageBuffer* msg)

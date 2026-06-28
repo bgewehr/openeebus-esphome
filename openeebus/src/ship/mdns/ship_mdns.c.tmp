@@ -1,0 +1,7 @@
+ShipMdns
+void Destruct()
+EebusError Start()
+void Stop()
+EebusError RegisterService()
+void DeregisterService()
+void SetAutoaccept(bool autoaccept)

@@ -1,0 +1,7 @@
+TlsCertificate
+void Destruct()
+const char* GetSki() const
+const void* GetCertificate() const
+size_t GetCertificateSize() const
+const void* GetPrivateKey() const
+size_t GetPrivateKeySize() const

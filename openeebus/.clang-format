@@ -1,0 +1,25 @@
+# clang-format version 18
+Language: Cpp
+BasedOnStyle: Google
+Standard: Cpp11
+ColumnLimit: 120
+ContinuationIndentWidth: 4
+BreakBeforeBinaryOperators: All
+DerivePointerAlignment: false
+BinPackArguments: false
+BinPackParameters : false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowAllArgumentsOnNextLine: false
+PointerAlignment: Left
+AlignArrayOfStructures: Right
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveAssignments:
+  Enabled: true
+  PadOperators: true
+AllowShortCaseLabelsOnASingleLine: true
+InsertNewlineAtEOF: true
+StatementMacros:
+  - Q_UNUSED
+  - QT_REQUIRE_VERSION
+IncludeBlocks: Preserve
+AllowShortFunctionsOnASingleLine: Empty

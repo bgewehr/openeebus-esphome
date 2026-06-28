@@ -1,0 +1,16 @@
+DeviceRemote
+const char* GetSki() const
+DataReaderObject* GetDataReader() const
+void AddEntity(EntityRemoteObject* entity)
+EntityRemoteObject* ReleaseEntity(const uint32_t* const* entity_ids, size_t entity_ids_size)
+EntityRemoteObject* GetEntity(const uint32_t* const* entity_ids, size_t entity_ids_size) const
+const Vector* GetEntities() const
+FeatureRemoteObject* GetFeatureWithAddress(const FeatureAddressType* feature_addr) const
+FeatureRemoteObject* GetFeatureWithTypeAndRole(const uint32_t* const* entity_ids, size_t entity_ids_size, FeatureTypeType feature_type, RoleType role) const
+EebusError HandleSpineMesssage(MessageBuffer* msg)
+NodeManagementRemoteObject* GetNodeManagement() const
+SenderObject* GetSender() const
+NodeManagementUseCaseDataType* UseCasesDataCopy() const
+void UpdateDevice(const NetworkManagementDeviceDescriptionDataType* description)
+const Vector* AddEntityAndFeatures(bool init, const NodeManagementDetailedDiscoveryDataType* data)
+EebusError CheckEntityInformation(bool init, const NodeManagementDetailedDiscoveryEntityInformationType* entity_info) const

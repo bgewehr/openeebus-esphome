@@ -1,0 +1,6 @@
+EebusTimer
+void Destruct()
+void Start(uint32_t timeout_ms, bool autoreload)
+void Stop()
+uint32_t GetRemainingTime() const
+EebusTimerState GetTimerState() const

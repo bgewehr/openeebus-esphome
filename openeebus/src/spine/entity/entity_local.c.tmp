@@ -1,0 +1,17 @@
+EntityLocal
+DeviceLocalObject* GetDevice() const
+HeartbeatManagerObject* GetHeartbeatManager() const
+void AddFeature(FeatureLocalObject* feature)
+FeatureLocalObject* GetFeatureWithTypeAndRole(FeatureTypeType feature_type, RoleType role) const
+FeatureLocalObject* AddFeatureWithTypeAndRole(FeatureTypeType feature_type, RoleType role)
+FeatureLocalObject* GetFeatureWithId(const uint32_t* feature_id) const
+const Vector* GetFeatures() const
+void AddUseCaseSupport(UseCaseActorType actor, UseCaseNameType use_case_name_id, SpecificationVersionType version, const char* sub_revision, bool available, const UseCaseScenarioSupportType* scenarios, size_t scenarios_size)
+bool HasUseCaseSupport(const UseCaseFilterType* use_case_filter) const
+void SetUseCaseAvailability(const UseCaseFilterType* use_case_filter, bool available)
+void RemoveUseCaseSupports(const UseCaseFilterType* use_case_filters, size_t use_case_filters_size)
+void RemoveAllUseCaseSupports()
+void RemoveAllSubscriptions()
+void RemoveAllBindings()
+NodeManagementDetailedDiscoveryEntityInformationType* CreateInformation() const
+void Tick()

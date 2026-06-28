@@ -46,8 +46,9 @@ static const uint32_t kHeartbeatTimeoutSeconds = 60;
 /* Pairing window: how long a pending SKI waits for user confirmation */
 static const uint32_t kPairingWindowMs = 120000;
 
-/* Electrical connection ID for the CS LPC use case */
-static const uint32_t kElectricalConnectionId = 1;
+/* Electrical connection ID for the CS LPC use case.
+ * Use 0 to match the openeebus reference (hpsrv.c kHpsrvElectricalConnectionId). */
+static const uint32_t kElectricalConnectionId = 0;
 
 /* =========================================================================
  * ServiceReader C vtable
@@ -466,6 +467,10 @@ bool EebusLpcComponent::start_eebus_service_(
       "EnergyManagementSystem",     /* device_type */
       ship_port_);
   if (!cfg) { ESP_LOGE(TAG, "EebusServiceConfigCreate failed"); return false; }
+
+  /* Set alternate identifier for mDNS discovery (matches openeebus HEMS example) */
+  std::string alt_id = device_brand_ + "-" + device_model_ + "-HEMS-CS-01";
+  EebusServiceConfigSetAlternateIdentifier(cfg, alt_id.c_str());
 
   EebusServiceConfigSetRegisterAutoAccept(cfg, remote_ski_.empty());
 

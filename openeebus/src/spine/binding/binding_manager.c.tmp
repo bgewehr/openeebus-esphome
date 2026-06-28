@@ -1,0 +1,8 @@
+BindingManager
+void Destruct()
+EebusError AddBinding(DeviceRemoteObject* remote_device, const BindingManagementRequestCallType* data)
+EebusError RemoveBinding(const BindingManagementDeleteCallType* data, DeviceRemoteObject* remote_device)
+void RemoveDeviceBindings(DeviceRemoteObject* remote_device)
+void RemoveEntityBindings(EntityRemoteObject* remote_entity)
+bool HasBinding(const FeatureAddressType* local_addr, const FeatureAddressType* remote_addr) const
+NodeManagementBindingDataType* CreateBindingData(const DeviceRemoteObject* remote_device) const

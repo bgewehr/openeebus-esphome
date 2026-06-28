@@ -1,0 +1,9 @@
+EntityRemote
+DeviceRemoteObject* GetDevice() const
+void UpdateDeviceAddress(const char* device_addr)
+void AddFeature(FeatureRemoteObject* feature)
+void RemoveAllFeatures()
+FeatureRemoteObject* GetFeatureWithTypeAndRole(FeatureTypeType feature_type, RoleType role) const
+FeatureRemoteObject* GetFeatureWithId(const uint32_t* feature_id) const
+const Vector* GetFeatures() const
+bool HasUseCaseSupport(const UseCaseFilterType* use_case_filter) const

@@ -1,0 +1,7 @@
+Entity
+void Destruct()
+const EntityAddressType* GetAddress() const
+EntityTypeType GetType() const
+const char* GetDescription() const
+void SetDescription(const char* description)
+uint32_t GetNextFeatureId()

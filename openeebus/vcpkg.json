@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "openssl",
+    "libwebsockets",
+    "cjson",
+    "pthreads",
+    "mdnsresponder"
+  ]
+}

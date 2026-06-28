@@ -1,0 +1,7 @@
+EebusQueue
+void Destruct()
+EebusError Send(const void* msg, uint32_t timeout_ms)
+EebusError Receive(void* msg, uint32_t timeout_ms)
+bool IsEmpty() const
+bool IsFull() const
+void Clear()

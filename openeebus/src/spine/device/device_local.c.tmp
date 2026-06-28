@@ -1,0 +1,24 @@
+DeviceLocal
+EebusError Start()
+void Stop()
+DataReaderObject* SetupRemoteDevice(const char* ski, DataWriterObject* writer)
+void AddRemoteDeviceForSki(const char* ski, DeviceRemoteObject* remote_device)
+EebusError RequestRemoteDetailedDiscoveryData(const DeviceRemoteObject* remote_device)
+void RemoveRemoteDeviceConnection(const char* ski)
+void RemoveRemoteDevice(const char* ski)
+DeviceRemoteObject* GetRemoteDeviceWithAddress(const char* device_addr) const
+DeviceRemoteObject* GetRemoteDeviceWithSki(const char* ski) const
+void AddEntity(EntityLocalObject* entity)
+void RemoveEntity(EntityLocalObject* entity)
+EntityLocalObject* GetEntity(const uint32_t* const* entity_ids, size_t entity_ids_size) const
+EntityLocalObject* GetEntityWithType(EntityTypeType entity_type) const 
+const Vector* GetEntities() const
+FeatureLocalObject* GetFeatureWithAddress(const FeatureAddressType* feature_addr) const
+EebusError HandleMessage(MessageBuffer* msg, DeviceRemoteObject* remote_device)
+NodeManagementObject* GetNodeManagement() const
+BindingManagerObject* GetBindingManager() const
+SubscriptionManagerObject* GetSubscriptionManager() const
+void NotifySubscribers(const FeatureAddressType* feature_addr, const CmdType* cmd) const 
+NodeManagementDetailedDiscoveryDeviceInformationType* CreateInformation() const
+void Lock()
+void Unlock()
