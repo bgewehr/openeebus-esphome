@@ -38,13 +38,15 @@ WebsocketCreatorObject* WebsocketClientCreatorCreate(
     const TlsCertificateObject*  tls_cert,
     const char*                  remote_ski)
 {
+  /* Pass NULL as CA cert — K40rf (and all EEBus devices) use self-signed certs
+   * that cannot be chain-verified.  Identity is established at the SHIP layer
+   * via SKI comparison, not via TLS PKI.  With no CA, mbedtls uses
+   * MBEDTLS_SSL_VERIFY_NONE and the TLS handshake completes. */
   return WebsocketClientCreatorEsp32Create(
       uri,
       TLS_CERTIFICATE_GET_CERTIFICATE(tls_cert),
       TLS_CERTIFICATE_GET_CERTIFICATE_SIZE(tls_cert),
       TLS_CERTIFICATE_GET_PRIVATE_KEY(tls_cert),
       TLS_CERTIFICATE_GET_PRIVATE_KEY_SIZE(tls_cert),
-      /* CA cert: use our own cert as root (self-signed / TOFU model) */
-      TLS_CERTIFICATE_GET_CERTIFICATE(tls_cert),
-      TLS_CERTIFICATE_GET_CERTIFICATE_SIZE(tls_cert));
+      NULL, 0);
 }
