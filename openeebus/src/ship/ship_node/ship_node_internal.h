@@ -69,6 +69,9 @@ struct ShipNode {
   // for early stage of Ship Node development and testing.
   // To be replaces with multiple instances handling
   ShipConnectionObject* ship_connection;
+  /* Outbound connection that was cancelled to accept a trusted inbound.
+   * Freed by CloseShipConnection when its close callback fires. */
+  ShipConnectionObject* cancel_ship_connection;
   WebsocketCreatorObject* websocket_creator;
   HttpServerObject* http_server;
   bool connection_attempt_running;

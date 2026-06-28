@@ -180,7 +180,8 @@ void ShipNodeConstruct(
     self->role = kShipRoleAuto;
   }
 
-  self->ship_connection = NULL;
+  self->ship_connection        = NULL;
+  self->cancel_ship_connection = NULL;
 }
 
 ShipNodeObject* ShipNodeCreate(
@@ -235,6 +236,12 @@ void Destruct(InfoProviderObject* self) {
   if (sn->http_server != NULL) {
     HttpServerDelete(sn->http_server);
     sn->http_server = NULL;
+  }
+
+  if (sn->cancel_ship_connection != NULL) {
+    SHIP_CONNECTION_STOP(sn->cancel_ship_connection);
+    ShipConnectionDelete(sn->cancel_ship_connection);
+    sn->cancel_ship_connection = NULL;
   }
 
   if (sn->ship_connection != NULL) {
@@ -293,6 +300,14 @@ bool IsRemoteServiceForSkiPaired(InfoProviderObject* self, const char* ski) {
 
 void CloseShipConnection(ShipNode* self, ShipConnectionObject* sc, bool had_error) {
   UNUSED(had_error);
+
+  /* A previously in-progress outbound was stopped to accept a trusted inbound.
+   * Its close callback fires here — just free the object, no disconnect processing. */
+  if (sc != NULL && sc == self->cancel_ship_connection) {
+    ShipConnectionDelete(sc);
+    self->cancel_ship_connection = NULL;
+    return;
+  }
 
   if ((sc == NULL) || (sc != self->ship_connection)) {
     SHIP_NODE_DEBUG_PRINTF("%s(), invalid Ship Connection instance\n", __func__);
@@ -465,7 +480,12 @@ void* ShipNodeConnectionLoop(void* ctx) {
       ShipNodeUnregisterSki(SHIP_NODE_OBJECT(sn), queue_msg.ski);
     } else if (queue_msg.type == kShipNodeQueueMsgTypeShipRegisterSki) {
       ShipNodeRegisterSki(SHIP_NODE_OBJECT(sn), queue_msg.ski, true);
-      ShipNodeConnectToRemoteSki(sn);
+      /* Do NOT call ShipNodeConnectToRemoteSki here: the remote device (K40RF)
+       * is the preferred connection initiator in EEBus "auto" role.  Immediately
+       * starting an outbound attempt at registration time races with the inbound
+       * from the remote device and causes kSmeStateError (state=39) on both sides.
+       * The mDNS-triggered path (kShipNodeQueueMsgTypeMdnsEntriesFound) will still
+       * start an outbound if the remote has not connected inbound first. */
     }
     ShipNodeQueueMsgDeallocator(&queue_msg);
   }
@@ -476,11 +496,15 @@ void* ShipNodeConnectionLoop(void* ctx) {
 int ShipNodeOnWebsocketServerConnectionCallback(const char* ski, WebsocketCreatorObject* websocket_creator, void* ctx) {
   ShipNode* const sn = (ShipNode*)ctx;
 
-  if (sn->cancel || sn->connection_attempt_running) {
+  if (sn->cancel) {
     return -1;
   }
 
-  // Check the SKI
+  /* Check the SKI BEFORE connection_attempt_running so we can handle the
+   * startup race: both sides discover each other simultaneously via mDNS and
+   * both try to connect.  If our trusted partner arrives inbound while our
+   * outbound attempt is in progress, we prefer the inbound (the remote device
+   * is typically the EEBus client/initiator) and cancel the outbound. */
   EEBUS_MUTEX_LOCK(sn->mutex);
   bool is_ski_trusted = SkiMatches(ski, sn->remote_ski);
   if (!is_ski_trusted) {
@@ -499,6 +523,22 @@ int ShipNodeOnWebsocketServerConnectionCallback(const char* ski, WebsocketCreato
 
   if (!is_ski_trusted) {
     SHIP_NODE_DEBUG_PRINTF("%s(), Remote SKI is not trusted\n", __func__);
+    return -1;
+  }
+
+  /* Trusted inbound while an outbound attempt is running: cancel the outbound
+   * and accept the inbound.  The cancelled connection will be freed by
+   * CloseShipConnection when its teardown callback fires. */
+  if (sn->connection_attempt_running && sn->ship_connection != NULL) {
+    SHIP_NODE_DEBUG_PRINTF(
+        "%s(), Trusted inbound from %s during outbound — cancelling outbound\n", __func__, ski);
+    SHIP_CONNECTION_STOP(sn->ship_connection);
+    sn->cancel_ship_connection   = sn->ship_connection;
+    sn->ship_connection          = NULL;
+    sn->connection_attempt_running = false;
+  }
+
+  if (sn->connection_attempt_running) {
     return -1;
   }
 
