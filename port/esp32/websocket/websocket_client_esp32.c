@@ -185,7 +185,7 @@ static void Destruct(WebsocketObject* self) {
     EEBUS_FREE(ws->rx_buf);
     ws->rx_buf = NULL;
   }
-  EEBUS_FREE(ws);
+  /* Do NOT free ws here — WebsocketDelete() handles that after calling Destruct */
 }
 
 static int32_t Write(WebsocketObject* self, const uint8_t* msg, size_t msg_size) {
@@ -268,7 +268,7 @@ static void CreatorDestruct(WebsocketCreatorObject* self) {
   if (c->cert_der) { EEBUS_FREE(c->cert_der); }
   if (c->key_der)  { EEBUS_FREE(c->key_der); }
   if (c->ca_der)   { EEBUS_FREE(c->ca_der); }
-  EEBUS_FREE(c);
+  /* Do NOT free c here — WebsocketCreatorDelete() handles that after calling Destruct */
 }
 
 static WebsocketObject* CreatorCreateWebsocket(

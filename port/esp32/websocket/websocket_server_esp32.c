@@ -89,7 +89,7 @@ static void Destruct(WebsocketObject* self) {
     vSemaphoreDelete(ws->write_mutex);
     ws->write_mutex = NULL;
   }
-  EEBUS_FREE(ws);
+  /* Do NOT free ws here — WebsocketDelete() handles that after calling Destruct */
 }
 
 static int32_t Write(WebsocketObject* self, const uint8_t* msg, size_t msg_size) {
