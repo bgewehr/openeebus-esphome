@@ -40,8 +40,6 @@
 #include <esp_https_server.h>
 #include <esp_log.h>
 #include <esp_tls.h>
-#include <mbedtls/pk.h>
-#include <mbedtls/sha1.h>
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
 #include <string.h>
@@ -52,6 +50,7 @@
 #include "src/ship/api/tls_certificate_interface.h"
 #include "src/ship/api/websocket_creator_interface.h"
 #include "src/ship/api/websocket_interface.h"
+#include "src/ship/tls_certificate/tls_certificate.h"
 #include "websocket_server_esp32.h"
 
 static const char* TAG = "eebus_http_srv";
@@ -89,63 +88,60 @@ static const HttpServerInterface kHttpServerMethods = {
  * SKI extraction from peer TLS certificate
  * ---------------------------------------------------------------------- */
 
-/* Compute SHIP SKI: SHA-1 of the raw public key bytes inside the SubjectPublicKeyInfo
- * BIT STRING (RFC 5280 method 1). Matches what openeebus CalcSubjectKeyIdString does.
- * Output: 40-char lowercase hex string without colons (e.g. "52ab299a..."). */
-static int ExtractSkiFromDer(const uint8_t* cert_der, size_t cert_len,
-                             char* ski_out, size_t ski_out_sz) {
-  if (ski_out_sz < 41) return -1;
+/* Private copy of esp_https_server's internal transport context layout.
+ * Must match httpd_ssl_transport_ctx_t in esp-idf/components/esp_https_server/src/https_server.c.
+ * httpd_sess_get_transport_ctx() returns this struct, NOT esp_tls_t* directly. */
+typedef struct {
+  esp_tls_t *tls;
+  void      *global_ctx; /* httpd_ssl_ctx_t* — not used here */
+} ship_ssl_transport_ctx_t;
 
-  mbedtls_x509_crt crt;
-  mbedtls_x509_crt_init(&crt);
+/* Extract SHIP SKI from the TLS peer certificate for this connection.
+ * Returns ski_out on success (40-char lowercase hex), NULL if cert unavailable.
+ *
+ * MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is hardcoded in ESP-IDF's mbedtls_config.h,
+ * so mbedtls_ssl_get_peer_cert() is always available after the handshake. */
+static const char* ExtractSkiFromPeerCert(httpd_handle_t server, int sockfd,
+                                          char* ski_out, size_t ski_out_sz) {
+  if (ski_out_sz < 41) return NULL;
 
-  int ret = mbedtls_x509_crt_parse_der(&crt, cert_der, cert_len);
-  if (ret != 0) {
-    mbedtls_x509_crt_free(&crt);
-    return -1;
+  ship_ssl_transport_ctx_t* tctx =
+      (ship_ssl_transport_ctx_t*)httpd_sess_get_transport_ctx(server, sockfd);
+  if (!tctx) {
+    ESP_LOGE(TAG, "SKI: transport ctx NULL for fd=%d", sockfd);
+    return NULL;
+  }
+  if (!tctx->tls) {
+    ESP_LOGE(TAG, "SKI: esp_tls_t NULL in transport ctx for fd=%d", sockfd);
+    return NULL;
   }
 
-  /* Write SubjectPublicKeyInfo DER into a temp buffer (written at end of buf).
-   * Reference openeebus uses 2048 bytes; match that size to handle any key type. */
-  uint8_t buf[2048];
-  int len = mbedtls_pk_write_pubkey_der(&crt.pk, buf, sizeof(buf));
-  mbedtls_x509_crt_free(&crt);
-  if (len < 0) return -1;
-
-  /* mbedtls_pk_write_pubkey_der writes at end of buf */
-  const uint8_t* p = buf + sizeof(buf) - len;
-
-  /* Skip outer SEQUENCE tag + length */
-  if (len < 2 || p[0] != 0x30) return -1;
-  int hdr = 2 + ((p[1] & 0x80) ? (p[1] & 0x7f) : 0);
-  p += hdr; len -= hdr;
-
-  /* Skip AlgorithmIdentifier SEQUENCE */
-  if (len < 2 || p[0] != 0x30) return -1;
-  int alg_len = p[1] + 2;
-  p += alg_len; len -= alg_len;
-
-  /* Skip BIT STRING tag + length */
-  if (len < 2 || p[0] != 0x03) return -1;
-  hdr = 2 + ((p[1] & 0x80) ? (p[1] & 0x7f) : 0);
-  p += hdr; len -= hdr;
-
-  /* Skip unused-bits byte */
-  if (len < 1) return -1;
-  p += 1; len -= 1;
-
-  /* SHA-1 of the raw public key */
-  unsigned char hash[20];
-  ret = mbedtls_sha1(p, (size_t)len, hash);
-  if (ret != 0) return -1;
-
-  /* Format as 40-char lowercase hex without colons */
-  char* out = ski_out;
-  for (int i = 0; i < 20; i++) {
-    out += snprintf(out, 3, "%02x", hash[i]);
+  mbedtls_ssl_context* ssl = (mbedtls_ssl_context*)esp_tls_get_ssl_context(tctx->tls);
+  if (!ssl) {
+    ESP_LOGE(TAG, "SKI: esp_tls_get_ssl_context returned NULL for fd=%d", sockfd);
+    return NULL;
   }
-  *out = '\0';
-  return 0;
+
+  const mbedtls_x509_crt* peer_cert = mbedtls_ssl_get_peer_cert(ssl);
+  if (!peer_cert || peer_cert->raw.len == 0) {
+    /* Peer did not send a certificate. SHIP requires mutual TLS — check that
+     * CONFIG_ESP_TLS_SERVER_MIN_AUTH_MODE_OPTIONAL=y is set so that the server
+     * sends a Certificate Request and the peer responds with its cert. */
+    ESP_LOGE(TAG, "SKI: peer cert NULL/empty for fd=%d — K40rf may not have sent its cert", sockfd);
+    return NULL;
+  }
+
+  const char* ski = TlsCertificateCalcPublicKeySki(peer_cert->raw.p, peer_cert->raw.len);
+  if (!ski) {
+    ESP_LOGE(TAG, "SKI: TlsCertificateCalcPublicKeySki failed for fd=%d (cert len=%u)",
+             sockfd, (unsigned)peer_cert->raw.len);
+    return NULL;
+  }
+
+  strncpy(ski_out, ski, ski_out_sz - 1);
+  ski_out[ski_out_sz - 1] = '\0';
+  EEBUS_FREE((void*)ski);
+  return ski_out;
 }
 
 /* -------------------------------------------------------------------------
@@ -172,29 +168,16 @@ static esp_err_t ShipWsHandler(httpd_req_t* req) {
 
     int sockfd = httpd_req_to_sockfd(req);
 
-    /* Extract peer certificate SKI from TLS session */
-    char peer_ski_buf[60] = {0};
+    char peer_ski_buf[41] = {0};
     const char* peer_ski = "unknown";
-
-    esp_tls_t* tls = (esp_tls_t*)httpd_sess_get_transport_ctx(req->handle, sockfd);
-    if (tls) {
-      mbedtls_ssl_context* ssl = (mbedtls_ssl_context*)esp_tls_get_ssl_context(tls);
-      if (ssl) {
-        const mbedtls_x509_crt* peer_cert = mbedtls_ssl_get_peer_cert(ssl);
-        if (peer_cert && peer_cert->raw.len > 0) {
-          if (ExtractSkiFromDer(peer_cert->raw.p, peer_cert->raw.len,
-                                peer_ski_buf, sizeof(peer_ski_buf)) == 0) {
-            peer_ski = peer_ski_buf;
-            ESP_LOGW(TAG, "Peer SKI: %s", peer_ski);
-          } else {
-            ESP_LOGW(TAG, "Failed to extract SKI from peer cert");
-          }
-        } else {
-          ESP_LOGW(TAG, "No peer certificate in TLS session (SKI will be 'unknown')");
-        }
+    {
+      const char* s = ExtractSkiFromPeerCert(req->handle, sockfd,
+                                             peer_ski_buf, sizeof(peer_ski_buf));
+      if (s) {
+        peer_ski = peer_ski_buf;
+        ESP_LOGW(TAG, "Peer SKI: %s (fd=%d)", peer_ski, sockfd);
       }
-    } else {
-      ESP_LOGW(TAG, "No TLS transport context");
+      /* Detailed error already logged inside ExtractSkiFromPeerCert */
     }
 
     if (!srv->conn_establish_cb) {
@@ -305,14 +288,16 @@ static EebusError Start(HttpServerObject* self) {
   ssl_cfg.httpd.max_open_sockets = 4;
   ssl_cfg.httpd.ctrl_port        = 32768 + (uint16_t)srv->port;
 
-  /* Request client certificate with empty CA list (SHIP spec: SKI-based trust,
-   * not CA chain validation). With no cacert and VERIFY_OPTIONAL auth mode,
-   * mbedTLS sends Certificate Request with an empty acceptable CA list, which
-   * causes SHIP devices (e.g. K40RF) to respond with their self-signed cert
-   * unconditionally. Setting cacert_pem to our own cert would cause the
-   * Certificate Request to list only our cert's subject — SHIP peers that
-   * can't find a matching issuer would then send an empty Certificate message,
-   * making peer_cert NULL and SKI extraction impossible. */
+  /* ESP-IDF only sets MBEDTLS_SSL_VERIFY_OPTIONAL (which sends a Certificate
+   * Request to the peer) when cacert_buf != NULL. Set our own server cert as
+   * the "CA" just to satisfy that check. With VERIFY_OPTIONAL the connection
+   * proceeds even when the peer's self-signed cert doesn't chain to us —
+   * SHIP uses SKI-based trust, not CA chain validation. Both Python (OpenSSL)
+   * and K40rf (mbedTLS) send their configured cert regardless of the CA list
+   * in the Certificate Request, so peer_cert will be non-NULL after the
+   * handshake and SKI extraction will succeed. */
+  ssl_cfg.cacert_pem = TLS_CERTIFICATE_GET_CERTIFICATE(srv->tls_cert);
+  ssl_cfg.cacert_len = TLS_CERTIFICATE_GET_CERTIFICATE_SIZE(srv->tls_cert);
 #ifdef CONFIG_ESP_TLS_SERVER_MIN_AUTH_MODE_OPTIONAL
   ssl_cfg.client_cert_authmode_optional = true;
 #endif

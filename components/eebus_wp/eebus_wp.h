@@ -161,6 +161,7 @@ class EebusWpComponent : public Component {
     EgLpListenerObject obj;   /* must be first */
     EebusWpComponent*  self;
   } eg_listener_{};
+
 };
 
 /* -------------------------------------------------------------------------

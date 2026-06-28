@@ -200,10 +200,23 @@ void EebusLpcComponent::on_remote_ski_connected(const char* ski) {
   pending_remote_ski_ = ski;
 
   if (!remote_ski_.empty() && remote_ski_ == ski) {
+    /* Known stored SKI — register for persistent auto-connect */
     ESP_LOGI(TAG, "Known SKI — auto-trusting");
     EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, ski, true);
     update_pairing_state_("Verbunden: " + std::string(ski));
+  } else if (paired_remote_ski_ == ski) {
+    /* SHIP DataExchange already completed via is_waiting_for_trust_allowed.
+     * on_ship_state_update(kSmeStateApproved) set paired_remote_ski_ and
+     * cleared pairing_mode_active_ before this callback fires — so we can no
+     * longer rely on pairing_mode_active_ to detect a just-paired session.
+     * Persist the SKI and register it for future auto-connect. */
+    ESP_LOGI(TAG, "SHIP-approved SKI — persisting: %s", ski);
+    remote_ski_ = ski;
+    save_trusted_ski_(remote_ski_);
+    EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, ski, true);
+    update_pairing_state_("Verbunden: " + std::string(ski));
   } else if (pairing_mode_active_ && millis() < pairing_deadline_ms_) {
+    /* Unknown SKI, explicit pairing window still open — let the user approve */
     ESP_LOGW(TAG, "Unknown SKI wants to pair: %s", ski);
     update_pairing_state_("Pairing-Anfrage: " + std::string(ski));
     for (auto* t : pairing_request_triggers_) t->trigger(std::string(ski));
@@ -231,6 +244,12 @@ void EebusLpcComponent::on_remote_ski_disconnected(const char* ski) {
 void EebusLpcComponent::on_ship_state_update(const char* ski, SmeState state) {
   ESP_LOGD(TAG, "SHIP state ski=%s state=%d", ski, (int)state);
   if (state == kSmeStateApproved || state == kDataExchange) {
+    if (!ski || strcmp(ski, "unknown") == 0 || strlen(ski) < 40) {
+      ESP_LOGE(TAG, "DataExchange mit ungültiger SKI '%s' — Pairing ignoriert. "
+               "Prüfe CONFIG_MBEDTLS_SSL_KEEP_PEER_CERTIFICATE=y in sdkconfig.",
+               ski ? ski : "null");
+      return;
+    }
     if (paired_remote_ski_ != ski) {
       paired_remote_ski_ = ski;
       pending_remote_ski_.clear();
@@ -496,8 +515,13 @@ bool EebusLpcComponent::start_eebus_service_(
   EebusServiceConfigDelete(cfg);
   if (!service_) { ESP_LOGE(TAG, "EebusServiceCreate failed"); return false; }
 
-  if (!remote_ski_.empty())
+  if (!remote_ski_.empty() && remote_ski_ != "unknown" && remote_ski_.length() >= 40) {
     EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, remote_ski_.c_str(), true);
+    ESP_LOGI(TAG, "Registered remote LPC SKI: %s", remote_ski_.c_str());
+  } else if (!remote_ski_.empty()) {
+    ESP_LOGW(TAG, "Ignoring invalid remote SKI from config: '%s'", remote_ski_.c_str());
+    remote_ski_.clear();
+  }
 
   /* Create local entity — CS acts as EnergyManagementSystem entity.
    * kHeartbeatTimeoutSeconds activates the HeartbeatManager so openeebus

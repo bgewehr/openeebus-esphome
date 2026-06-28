@@ -151,6 +151,20 @@ EebusError Start(HeartbeatManagerObject* self) {
 
   hm->running = true;
 
+  /* Immediately publish a fresh heartbeat so remote entities that subscribe
+   * right after Start() see a current timestamp rather than the stale one
+   * from before the last Stop(). Without this, a remote LP that subscribes
+   * after a reconnect would see an old timestamp and conclude the EG
+   * heartbeat is overdue, causing it to immediately disconnect. */
+  if (hm->local_feature != NULL) {
+    hm->heartbeat_num++;
+    UpdateHeartbeatData(hm);
+    /* Use half the timeout so the next periodic heartbeat fires at timeout/2
+     * seconds — well before the remote LP's 1×-timeout deadline.
+     * Prevents the race where K40rf's timer and our tick both expire at T=timeout. */
+    hm->tick_cnt = (hm->heartbeat_timeout > 1u) ? (hm->heartbeat_timeout / 2u) : hm->heartbeat_timeout;
+  }
+
   return kEebusErrorOk;
 }
 
