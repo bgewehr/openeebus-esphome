@@ -89,7 +89,7 @@ class EebusWpComponent : public Component {
   /* Pairing management */
   void enter_pairing_mode();
   void forget_pairing();
-  bool is_pairing_mode() const { return pairing_mode_; }
+  bool is_pairing_mode() const { return pairing_mode_active_; }
 
   /* State accessors */
   bool        is_connected()    const { return connected_; }
@@ -107,10 +107,11 @@ class EebusWpComponent : public Component {
   void on_power_reading(float watts);
 
   /* Public for ServiceReader vtable access */
-  std::string pairing_state_ {};
-  std::string remote_ski_    {};
-  std::string local_ski_     {};
-  bool        pairing_mode_  {false};
+  std::string pairing_state_       {};
+  std::string remote_ski_          {};
+  std::string local_ski_           {};
+  bool        pairing_mode_active_ {false};
+  uint32_t    pairing_deadline_ms_ {0};
   void save_remote_ski_nvs_(const char* ski);
   void on_ship_data_exchange_(const char* ski);  /* called by vtable on kDataExchange */
 

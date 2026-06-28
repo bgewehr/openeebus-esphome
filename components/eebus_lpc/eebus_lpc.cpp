@@ -43,8 +43,8 @@ static const char* NVS_KEY_TSKI = "trusted_ski";
  * the connection stale. 60 s matches the openeebus reference examples. */
 static const uint32_t kHeartbeatTimeoutSeconds = 60;
 
-/* Pairing window: how long a pending SKI waits for user confirmation */
-static const uint32_t kPairingWindowMs = 120000;
+/* Pairing window: how long the explicit pairing mode stays open */
+static const uint32_t kPairingWindowMs = 300000;  /* 5 minutes */
 
 /* Electrical connection ID for the CS LPC use case.
  * Use 0 to match the openeebus reference (hpsrv.c kHpsrvElectricalConnectionId). */
@@ -142,7 +142,7 @@ void EebusLpcComponent::setup() {
 
   free(cert); free(key);
   update_pairing_state_(remote_ski_.empty()
-      ? "Warte auf Verbindung (Pairing-Modus)"
+      ? "Kein Pairing — Pairing-Modus manuell aktivieren"
       : "Warte auf Steuerbox");
   ESP_LOGI(TAG, "EEBus LPC CS ready — local SKI: %s", local_ski_.c_str());
 }
@@ -166,16 +166,13 @@ void EebusLpcComponent::loop() {
   }
 
   /* Pairing window timeout */
-  static uint32_t pairing_start_ms = 0;
-  if (pairing_window_open_) {
-    if (pairing_start_ms == 0) pairing_start_ms = now;
-    if ((now - pairing_start_ms) > kPairingWindowMs) {
-      ESP_LOGW(TAG, "Pairing window expired");
-      reject_pairing();
-      pairing_start_ms = 0;
-    }
-  } else {
-    pairing_start_ms = 0;
+  if (pairing_mode_active_ && now >= pairing_deadline_ms_) {
+    ESP_LOGW(TAG, "Pairing window expired");
+    pairing_mode_active_ = false;
+    pairing_deadline_ms_ = 0;
+    if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
+    if (!pending_remote_ski_.empty()) reject_pairing();
+    update_pairing_state_("Pairing-Fenster abgelaufen");
   }
 }
 
@@ -206,13 +203,12 @@ void EebusLpcComponent::on_remote_ski_connected(const char* ski) {
     ESP_LOGI(TAG, "Known SKI — auto-trusting");
     EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, ski, true);
     update_pairing_state_("Verbunden: " + std::string(ski));
-  } else if (remote_ski_.empty()) {
+  } else if (pairing_mode_active_ && millis() < pairing_deadline_ms_) {
     ESP_LOGW(TAG, "Unknown SKI wants to pair: %s", ski);
-    pairing_window_open_ = true;
     update_pairing_state_("Pairing-Anfrage: " + std::string(ski));
     for (auto* t : pairing_request_triggers_) t->trigger(std::string(ski));
   } else {
-    ESP_LOGW(TAG, "Untrusted SKI %s — rejecting", ski);
+    ESP_LOGW(TAG, "Untrusted SKI %s — pairing not active, rejecting", ski);
     EEBUS_SERVICE_CANCEL_PAIRING_WITH_SKI(service_, ski);
     pending_remote_ski_.clear();
     update_pairing_state_("Abgelehnt: " + std::string(ski));
@@ -223,7 +219,7 @@ void EebusLpcComponent::on_remote_ski_disconnected(const char* ski) {
   ESP_LOGI(TAG, "Remote SKI disconnected: %s", ski);
   if (paired_remote_ski_ == ski)  paired_remote_ski_.clear();
   if (pending_remote_ski_ == ski) pending_remote_ski_.clear();
-  pairing_window_open_ = false;
+  /* pairing_mode_active_ stays — allow reconnect within the window */
 
   if (limit_active_) {
     limit_active_ = false; current_limit_w_ = 0.0f;
@@ -238,13 +234,15 @@ void EebusLpcComponent::on_ship_state_update(const char* ski, SmeState state) {
     if (paired_remote_ski_ != ski) {
       paired_remote_ski_ = ski;
       pending_remote_ski_.clear();
-      pairing_window_open_ = false;
+      pairing_mode_active_ = false;
+      pairing_deadline_ms_ = 0;
+      if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
       update_pairing_state_("Gepairt & verbunden: " + std::string(ski));
     }
   } else if (state == kSmeHelloStateAbort || state == kSmeHelloStateRejected ||
              state == kSmeStateError) {
     if (pending_remote_ski_ == ski) pending_remote_ski_.clear();
-    pairing_window_open_ = false;
+    /* pairing_mode_active_ stays — allow retry within the window */
     update_pairing_state_("Handshake fehlgeschlagen");
   }
 }
@@ -254,12 +252,20 @@ void EebusLpcComponent::on_ship_id_update(const char* ski, const char* ship_id) 
 }
 
 bool EebusLpcComponent::is_waiting_for_trust_allowed(const char* /*ski*/) {
-  return remote_ski_.empty() || pairing_window_open_;
+  return pairing_mode_active_ && millis() < pairing_deadline_ms_;
 }
 
 /* =========================================================================
  * Pairing control
  * ====================================================================== */
+
+void EebusLpcComponent::enter_pairing_mode() {
+  ESP_LOGW(TAG, "Pairing mode activated (window: %u s)", kPairingWindowMs / 1000);
+  pairing_mode_active_ = true;
+  pairing_deadline_ms_ = millis() + kPairingWindowMs;
+  if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, true);
+  update_pairing_state_("Pairing-Modus aktiv — warte auf CS-Verbindung...");
+}
 
 void EebusLpcComponent::accept_pairing() {
   if (pending_remote_ski_.empty()) {
@@ -267,7 +273,9 @@ void EebusLpcComponent::accept_pairing() {
   }
   const std::string ski = pending_remote_ski_;
   EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, ski.c_str(), true);
-  pairing_window_open_ = false;
+  pairing_mode_active_ = false;
+  pairing_deadline_ms_ = 0;
+  if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
   save_trusted_ski_(ski);
   remote_ski_ = ski;
   update_pairing_state_("Pairing akzeptiert: " + ski);
@@ -275,22 +283,26 @@ void EebusLpcComponent::accept_pairing() {
 }
 
 void EebusLpcComponent::reject_pairing() {
-  if (pending_remote_ski_.empty()) return;
-  EEBUS_SERVICE_CANCEL_PAIRING_WITH_SKI(service_, pending_remote_ski_.c_str());
-  pending_remote_ski_.clear();
-  pairing_window_open_ = false;
+  if (!pending_remote_ski_.empty()) {
+    EEBUS_SERVICE_CANCEL_PAIRING_WITH_SKI(service_, pending_remote_ski_.c_str());
+    pending_remote_ski_.clear();
+  }
+  pairing_mode_active_ = false;
+  pairing_deadline_ms_ = 0;
+  if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
   update_pairing_state_("Pairing abgelehnt");
 }
 
 void EebusLpcComponent::forget_pairing(const std::string& ski) {
   if (service_) EEBUS_SERVICE_UNREGISTER_REMOTE_SKI(service_, ski.c_str());
   if (paired_remote_ski_ == ski)  paired_remote_ski_.clear();
+  if (pending_remote_ski_ == ski) pending_remote_ski_.clear();
   if (remote_ski_ == ski)         remote_ski_.clear();
   nvs_handle_t h;
   if (nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
     nvs_erase_key(h, NVS_KEY_TSKI); nvs_commit(h); nvs_close(h);
   }
-  update_pairing_state_("Pairing zurückgesetzt");
+  enter_pairing_mode();
 }
 
 /* =========================================================================
@@ -472,7 +484,7 @@ bool EebusLpcComponent::start_eebus_service_(
   std::string alt_id = device_brand_ + "-" + device_model_ + "-HEMS-CS-01";
   EebusServiceConfigSetAlternateIdentifier(cfg, alt_id.c_str());
 
-  EebusServiceConfigSetRegisterAutoAccept(cfg, remote_ski_.empty());
+  EebusServiceConfigSetRegisterAutoAccept(cfg, false);  /* pairing requires explicit activation */
 
   /* ServiceReader vtable */
   SERVICE_READER_INTERFACE(&service_reader_.obj) = &kServiceReaderMethods;

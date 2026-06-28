@@ -45,6 +45,9 @@ static const char* NVS_KEY_SKI   = "remote_ski";
  * 60 s matches the openeebus reference HEMS example. */
 static const uint32_t kHeartbeatTimeoutSeconds = 60;
 
+/* Pairing window: how long the explicit pairing mode stays open */
+static const uint32_t kPairingWindowMs = 300000;  /* 5 minutes */
+
 /* =========================================================================
  * ServiceReader C vtable — bridges SHIP pairing events to C++ component
  * ====================================================================== */
@@ -79,6 +82,8 @@ static void SR_OnRemoteServicesUpdate(
 {
   auto* r = reinterpret_cast<WpServiceReader*>(o);
   if (!r->self->remote_ski_.empty()) return;  /* already targeting a specific device */
+  if (!r->self->pairing_mode_active_) return;  /* pairing mode not active */
+  if (millis() >= r->self->pairing_deadline_ms_) return;  /* window expired */
 
   size_t n = VectorGetSize(entries);
   for (size_t i = 0; i < n; i++) {
@@ -116,7 +121,8 @@ static void SR_OnShipStateUpdate(
 
 static bool SR_IsWaitingForTrustAllowed(const ServiceReaderObject* o, const char* ski) {
   if (!ski || strcmp(ski, "unknown") == 0 || strlen(ski) < 20) return false;
-  return reinterpret_cast<const WpServiceReader*>(o)->self->pairing_mode_;
+  const auto* self = reinterpret_cast<const WpServiceReader*>(o)->self;
+  return self->pairing_mode_active_ && millis() < self->pairing_deadline_ms_;
 }
 
 static const ServiceReaderInterface kServiceReaderMethods = {
@@ -192,6 +198,16 @@ void EebusWpComponent::loop() {
     }
   } else {
     heartbeat_alarm_ = false;
+  }
+
+  /* Pairing window timeout */
+  uint32_t now = millis();
+  if (pairing_mode_active_ && now >= pairing_deadline_ms_) {
+    ESP_LOGW(TAG, "Pairing window expired");
+    pairing_mode_active_ = false;
+    pairing_deadline_ms_ = 0;
+    if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
+    pairing_state_ = "Pairing-Fenster abgelaufen";
   }
 }
 
@@ -449,7 +465,7 @@ bool EebusWpComponent::start_eebus_service_(
       ship_port_);
   if (!cfg) { ESP_LOGE(TAG, "EebusServiceConfigCreate failed"); return false; }
 
-  EebusServiceConfigSetRegisterAutoAccept(cfg, remote_ski_.empty());
+  EebusServiceConfigSetRegisterAutoAccept(cfg, false);  /* pairing requires explicit activation */
 
   /* Set up ServiceReader vtable */
   SERVICE_READER_INTERFACE(&service_reader_) = &kServiceReaderMethods;
@@ -466,13 +482,12 @@ bool EebusWpComponent::start_eebus_service_(
 
   if (!remote_ski_.empty()) {
     EEBUS_SERVICE_REGISTER_REMOTE_SKI(service_, remote_ski_.c_str(), true);
-    pairing_mode_ = false;
     ESP_LOGI(TAG, "Registered remote WP SKI: %s", remote_ski_.c_str());
   } else {
-    pairing_mode_ = true;
-    EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, true);
-    ESP_LOGI(TAG, "WP pairing mode active — will accept first connecting device");
+    ESP_LOGI(TAG, "No remote SKI — pairing mode must be activated explicitly");
   }
+  pairing_mode_active_ = false;
+  pairing_deadline_ms_ = 0;
 
   /* Get local SPINE device */
   DeviceLocalObject* device_local = EEBUS_SERVICE_GET_LOCAL_DEVICE(service_);
@@ -516,21 +531,19 @@ bool EebusWpComponent::start_eebus_service_(
 
 void EebusWpComponent::on_ship_data_exchange_(const char* ski) {
   ESP_LOGW(TAG, "WP data exchange active — SKI persisted: %s", ski);
-  if (pairing_mode_) {
-    pairing_mode_ = false;
-    EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
+  if (pairing_mode_active_) {
+    pairing_mode_active_ = false;
+    pairing_deadline_ms_ = 0;
+    if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, false);
     ESP_LOGI(TAG, "Pairing mode exited after successful connection");
   }
 }
 
 void EebusWpComponent::enter_pairing_mode() {
-  ESP_LOGW(TAG, "Pairing mode activated");
-  pairing_mode_ = true;
-  if (service_) {
-    if (!remote_ski_.empty())
-      EEBUS_SERVICE_UNREGISTER_REMOTE_SKI(service_, remote_ski_.c_str());
-    EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, true);
-  }
+  ESP_LOGW(TAG, "Pairing mode activated (window: %u s)", kPairingWindowMs / 1000);
+  pairing_mode_active_ = true;
+  pairing_deadline_ms_ = millis() + kPairingWindowMs;
+  if (service_) EEBUS_SERVICE_SET_PAIRING_POSSIBLE(service_, true);
   pairing_state_ = "Pairing-Modus aktiv — warte auf Verbindung...";
 }
 

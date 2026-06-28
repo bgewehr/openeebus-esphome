@@ -102,27 +102,31 @@ class EebusLpcComponent : public Component {
    * Public API — callable from YAML lambdas and buttons
    * -------------------------------------------------------------------- */
 
+  /** Open a timed pairing window (must be called explicitly before any new device can pair) */
+  void enter_pairing_mode();
+
   /** Accept pairing with the currently pending SKI */
   void accept_pairing();
 
   /** Reject / cancel pairing with the currently pending SKI */
   void reject_pairing();
 
-  /** Remove a previously trusted SKI (force re-pairing) */
+  /** Remove a previously trusted SKI and re-open pairing window */
   void forget_pairing(const std::string& ski);
 
   /* -----------------------------------------------------------------------
    * State accessors (for sensors / text_sensors in YAML)
    * -------------------------------------------------------------------- */
-  bool        is_limit_active()     const { return limit_active_; }
-  float       current_limit_w()     const { return current_limit_w_; }
-  float       failsafe_limit_w()    const { return failsafe_limit_w_; }
-  std::string local_ski()           const { return local_ski_; }
-  std::string paired_remote_ski()   const { return paired_remote_ski_; }
-  std::string pending_remote_ski()  const { return pending_remote_ski_; }
-  std::string pairing_state()       const { return pairing_state_str_; }
-  bool        is_paired()           const { return !paired_remote_ski_.empty(); }
-  bool        has_pending_pairing() const { return !pending_remote_ski_.empty(); }
+  bool        is_limit_active()      const { return limit_active_; }
+  float       current_limit_w()      const { return current_limit_w_; }
+  float       failsafe_limit_w()     const { return failsafe_limit_w_; }
+  std::string local_ski()            const { return local_ski_; }
+  std::string paired_remote_ski()    const { return paired_remote_ski_; }
+  std::string pending_remote_ski()   const { return pending_remote_ski_; }
+  std::string pairing_state()        const { return pairing_state_str_; }
+  bool        is_paired()            const { return !paired_remote_ski_.empty(); }
+  bool        has_pending_pairing()  const { return !pending_remote_ski_.empty(); }
+  bool        is_pairing_mode()      const { return pairing_mode_active_; }
 
   /* -----------------------------------------------------------------------
    * Callbacks from openeebus C layer (called by vtable functions below)
@@ -164,11 +168,12 @@ class EebusLpcComponent : public Component {
   std::string pending_remote_ski_{};    /* connected but not yet trusted */
   std::string pairing_state_str_ {"Nicht verbunden"};
 
-  bool        limit_active_      {false};
-  float       current_limit_w_   {0.0f};
-  bool        heartbeat_lost_    {false};
-  uint32_t    last_heartbeat_ms_ {0};
-  bool        pairing_window_open_{false}; /* true while waiting for user confirm */
+  bool        limit_active_        {false};
+  float       current_limit_w_     {0.0f};
+  bool        heartbeat_lost_      {false};
+  uint32_t    last_heartbeat_ms_   {0};
+  bool        pairing_mode_active_ {false}; /* true only while explicit pairing window is open */
+  uint32_t    pairing_deadline_ms_ {0};     /* absolute millis() deadline for pairing window */
 
   /* openeebus handles */
   EebusServiceObject*  service_       {nullptr};
