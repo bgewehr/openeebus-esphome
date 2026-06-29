@@ -436,14 +436,34 @@ static void ShipNodeConnectToService(ShipNode* self, const MdnsEntry* found_entr
   );
 
   if (self->ship_connection != NULL) {
-    const EebusError err = SHIP_CONNECTION_START(self->ship_connection, self->websocket_creator);
+    /* Save outbound pointer locally — self->ship_connection may be overwritten
+     * by ShipNodeOnWebsocketServerConnectionCallback during the blocking
+     * SHIP_CONNECTION_START call (TCP+TLS+WS connect can take 50-200 ms). */
+    ShipConnectionObject* const outbound_sc = self->ship_connection;
+    const EebusError err = SHIP_CONNECTION_START(outbound_sc, self->websocket_creator);
 
-    self->connection_attempt_running = (err == kEebusErrorOk);
-  }
-
-  if ((self->connection_attempt_running == false) && (self->ship_connection != NULL)) {
-    ShipConnectionDelete(self->ship_connection);
-    self->ship_connection = NULL;
+    if (err != kEebusErrorOk) {
+      /* Outbound TCP/TLS/WS failed.  Only clear ship_connection if we still own it
+       * (the HTTP callback may have already replaced it with an inbound). */
+      if (self->ship_connection == outbound_sc) {
+        self->ship_connection = NULL;
+      }
+      ShipConnectionDelete(outbound_sc);
+    } else if (self->ship_connection != outbound_sc) {
+      /* HTTP callback accepted an inbound and overwrote ship_connection while our
+       * TCP connect was in progress.  Orphan outbound into cancel slot so that
+       * CloseShipConnection can free it when K40RF rejects its handshake. */
+      if (self->cancel_ship_connection == NULL) {
+        self->cancel_ship_connection = outbound_sc;
+      } else {
+        SHIP_CONNECTION_STOP(outbound_sc);
+        ShipConnectionDelete(outbound_sc);
+      }
+      /* connection_attempt_running already set true by the HTTP callback. */
+    } else {
+      /* Normal case: outbound connected and is still the current connection. */
+      self->connection_attempt_running = true;
+    }
   }
 
   WebsocketCreatorDelete(self->websocket_creator);
@@ -532,7 +552,10 @@ int ShipNodeOnWebsocketServerConnectionCallback(const char* ski, WebsocketCreato
   if (sn->connection_attempt_running && sn->ship_connection != NULL) {
     SHIP_NODE_DEBUG_PRINTF(
         "%s(), Trusted inbound from %s during outbound — cancelling outbound\n", __func__, ski);
-    SHIP_CONNECTION_STOP(sn->ship_connection);
+    /* Do NOT call SHIP_CONNECTION_STOP here — it calls EEBUS_THREAD_JOIN which
+     * blocks the HTTP server thread and prevents K40RF's inbound from proceeding.
+     * The outbound closes naturally when K40RF rejects it; CloseShipConnection
+     * frees it when its teardown callback fires via cancel_ship_connection. */
     sn->cancel_ship_connection   = sn->ship_connection;
     sn->ship_connection          = NULL;
     sn->connection_attempt_running = false;
