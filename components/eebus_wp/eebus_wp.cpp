@@ -6,7 +6,9 @@
 #include "eebus_wp.h"
 
 #include <cmath>
+#include <cstdarg>
 #include <cstring>
+#include <ctime>
 
 #include "esphome/core/log.h"
 
@@ -26,11 +28,75 @@ extern "C" {
 #include "src/ship/tls_certificate/tls_certificate.h"
 #include "src/spine/entity/entity_local.h"
 #include "src/spine/model/entity_types.h"
+#include "src/spine/model/node_management_types.h"
+#include "src/spine/events/events.h"
 #include "src/use_case/actor/eg/lpc/eg_lpc.h"
+#include "src/use_case/actor/ma/mpc/ma_mpc.h"
 #include "src/use_case/model/load_limit_types.h"
 }
 
 #include "port/esp32/websocket/websocket_server_esp32.h"
+
+/* ── SPINE event handler for initial exchange logging (item 2 of todo) ───── */
+
+static const char* spine_actor_name(int a) {
+  switch (a) {
+    case 2:  return "CEM";
+    case 4:  return "Compressor";
+    case 5:  return "ControllableSystem";
+    case 9:  return "EnergyGuard";
+    case 13: return "HeatPump";
+    case 18: return "MonitoredUnit";
+    case 19: return "MonitoringAppliance";
+    default: return "?";
+  }
+}
+
+static const char* spine_uc_name(int n) {
+  switch (n) {
+    case 14: return "limitationOfPowerConsumption";
+    case 25: return "monitoringOfPowerConsumption";
+    case 30: return "optimizationOfSelfConsumptionByHeatPumpCompressorFlexibility";
+    default: return "?";
+  }
+}
+
+static void spine_event_handler(const EventPayload* payload, void*) {
+  if (!payload) return;
+  const char* ski = payload->ski ? payload->ski : "?";
+  switch (payload->event_type) {
+    case kEventTypeUseCaseChange: {
+      const UseCaseFilterType* f = payload->use_case_filter;
+      if (!f) break;
+      const char* change = (payload->change_type == kElementChangeAdd)    ? "add"
+                         : (payload->change_type == kElementChangeUpdate)  ? "update"
+                         :                                                   "remove";
+      ESP_LOGD("eebus", "SPINE use-case %s from %s: actor=%d(%s) useCase=%d(%s)",
+               change, ski,
+               (int)f->actor, spine_actor_name(f->actor),
+               (int)f->use_case_name_id, spine_uc_name(f->use_case_name_id));
+      break;
+    }
+    case kEventTypeEntityChange:
+      if (payload->change_type == kElementChangeAdd)
+        ESP_LOGD("eebus", "SPINE entity added from %s", ski);
+      break;
+    case kEventTypeDeviceChange:
+      if (payload->change_type == kElementChangeAdd)
+        ESP_LOGD("eebus", "SPINE device discovered: ski=%s", ski);
+      break;
+    default: break;
+  }
+}
+
+/* Bridge: lets openeebus C files emit logs through ESPHome's log pipeline
+ * (visible in the web frontend) instead of the raw ESP-IDF serial logger. */
+extern "C" void eebus_log_d(const char* tag, int line, const char* fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  esphome::esp_log_vprintf_(ESPHOME_LOG_LEVEL_DEBUG, tag, line, fmt, args);
+  va_end(args);
+}
 
 namespace esphome {
 namespace eebus_wp {
@@ -40,10 +106,14 @@ static const char* NVS_KEY_CERT  = "cert_der";
 static const char* NVS_KEY_KEY   = "key_der";
 static const char* NVS_KEY_SKI   = "remote_ski";
 
-/* SPINE spec: EG sends heartbeat every kHeartbeatTimeoutSeconds.
- * WP expects a heartbeat within this window — if missed it raises a fault.
- * 60 s matches the openeebus reference HEMS example. */
+/* Outbound heartbeat timeout declared to K40RF in the DeviceDiagnosis heartbeat
+ * data (SPINE spec standard for HEMS). heartbeat_manager sends every
+ * timeout*3/4 = 45 s, well within the 60 s window. */
 static const uint32_t kHeartbeatTimeoutSeconds = 60;
+
+/* Inbound alarm: how long without a heartbeat from K40RF before we warn.
+ * K40RF sends its own heartbeat every ~40 s; 3× that gives a safe margin. */
+static const uint32_t kInboundHeartbeatAlarmMs = 120000u;
 
 /* Pairing window: how long the explicit pairing mode stays open */
 static const uint32_t kPairingWindowMs = 300000;  /* 5 minutes */
@@ -89,10 +159,11 @@ static void SR_OnRemoteServicesUpdate(
    * callback and triggering an outbound attempt from every mDNS update causes
    * spurious connections in the wrong direction. */
   auto* r = reinterpret_cast<WpServiceReader*>(o);
+  size_t n = VectorGetSize(entries);
+  ESP_LOGD("eebus", "mDNS WP scan: %zu entr%s visible", n, n == 1 ? "y" : "ies");
   if (!r->self->pairing_mode_active_) return;
   if (!r->self->remote_ski_.empty()) return;  /* already paired */
 
-  size_t n = VectorGetSize(entries);
   for (size_t i = 0; i < n; i++) {
     const MdnsEntry* entry = (const MdnsEntry*)VectorGetElement(entries, i);
     const char* ski = MdnsEntryGetSki(entry);
@@ -107,9 +178,14 @@ static void SR_OnRemoteServicesUpdate(
 }
 
 static void SR_OnShipIdUpdate(
-    ServiceReaderObject*, const char* ski, const char* ship_id)
+    ServiceReaderObject* o, const char* ski, const char* ship_id)
 {
+  auto* r = reinterpret_cast<WpServiceReader*>(o);
   ESP_LOGD("eebus_wp", "SHIP ID update ski=%s id=%s", ski, ship_id ? ship_id : "");
+  if (ship_id && ship_id[0] != '\0' && ski && r->self->remote_ski_ == ski) {
+    r->self->device_label_ = ship_id;
+    ESP_LOGI("eebus_wp", "WP device name: %s", ship_id);
+  }
 }
 
 static void SR_OnShipStateUpdate(
@@ -201,20 +277,25 @@ void EebusWpComponent::setup() {
 void EebusWpComponent::loop() {
   if (!service_ || !eg_lpc_) return;
 
-  /* Verify the local heartbeat is being sent (EgLpcIsHeartbeatWithinDuration
-   * checks our OWN heartbeat timestamp, not the remote ack). The timestamp
-   * goes stale only if DeviceLocal1sTickCallback stops firing — a genuine
-   * system problem. */
-  if (connected_ && !EgLpcIsHeartbeatWithinDuration(eg_lpc_)) {
+  /* Check if K40RF has sent us a heartbeat within 2× the declared timeout.
+   * EgLpcIsHeartbeatWithinDuration is broken (passes NULL remote entity →
+   * always returns false), so we track the last received heartbeat ourselves
+   * via on_heartbeat_received_() / last_heartbeat_ms_.
+   * Grace period: allow up to 2× timeout after connect before alarming —
+   * K40RF's heartbeat timer runs continuously and the first beat can arrive
+   * up to 1× timeout after our connection is established. */
+  const uint32_t hb_timeout_ms = kInboundHeartbeatAlarmMs;
+  const bool grace   = connected_ && ((millis() - connected_since_ms_) < hb_timeout_ms);
+  const bool hb_ok   = (last_heartbeat_ms_ != 0) &&
+                       ((millis() - last_heartbeat_ms_) < hb_timeout_ms);
+  if (connected_ && !grace && !hb_ok) {
     if (!heartbeat_alarm_) {
       ESP_LOGW(TAG, "WP heartbeat overdue \xe2\x80\x94 connection may be stale");
       heartbeat_alarm_ = true;
-      pairing_state_ = "Heartbeat-Ausfall \xe2\x80\x94 WP antwortet nicht";
     }
   } else {
     if (heartbeat_alarm_ && connected_) {
       ESP_LOGI(TAG, "WP heartbeat recovered");
-      pairing_state_ = "Verbunden mit WP";
     }
     heartbeat_alarm_ = false;
   }
@@ -241,6 +322,10 @@ void EebusWpComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Connected:      %s",   connected_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Heartbeat:      every %u s", kHeartbeatTimeoutSeconds);
   ESP_LOGCONFIG(TAG, "  Failsafe:       %.0f W / %u s", failsafe_limit_w_, failsafe_duration_s_);
+  ESP_LOGCONFIG(TAG, "  SPINE local:    device=EnergyManagementSystem entity=CEM(id=1) heartbeat=%us", kHeartbeatTimeoutSeconds);
+  ESP_LOGCONFIG(TAG, "  SPINE use-case: HEMS=EnergyGuard(9) <-> WP=ControllableSystem(5) / limitationOfPowerConsumption(14) [EG/LPC]");
+  ESP_LOGCONFIG(TAG, "  SPINE use-case: HEMS=MonitoringAppliance(19) <-> WP=MonitoredUnit(18) / monitoringOfPowerConsumption(25) [MA/MPC]");
+  ESP_LOGCONFIG(TAG, "  SPINE negotiated: %s", active_use_cases().c_str());
 }
 
 /* =========================================================================
@@ -291,6 +376,7 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
   ESP_LOGI(TAG, "WP entity connected");
   connected_          = true;
   heartbeat_alarm_    = false;
+  connected_since_ms_ = millis();
   have_remote_entity_ = true;
   if (addr) remote_entity_addr_ = *addr;
   pairing_state_      = "Verbunden mit WP";
@@ -307,12 +393,9 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
   fs_duration.seconds = (int32_t)failsafe_duration_s_;
   EgLpcSetFailsafeDurationMinimum(eg_lpc_, addr, &fs_duration);
 
-  /* Start sending heartbeat — WP requires this periodically.
-   * openeebus drives the heartbeat automatically via its internal
-   * FreeRTOS 1-second tick timer (device_local.c DeviceLocal1sTickCallback).
-   * EgLpcStartHeartbeat() activates the HeartbeatManager for this entity. */
-  EgLpcStartHeartbeat(eg_lpc_);
-  ESP_LOGI(TAG, "Heartbeat started (interval: %u s)", kHeartbeatTimeoutSeconds);
+  // Send initial "no limit active" — K40RF only shows "EEBus verbunden" after
+  // receiving at least one ActiveConsumptionPowerLimit write from the HEMS.
+  clear_limit();
 
   for (auto* t : connected_triggers_) t->trigger();
 }
@@ -320,11 +403,15 @@ void EebusWpComponent::on_entity_connect(const EntityAddressType* addr) {
 void EebusWpComponent::on_entity_disconnect(const EntityAddressType* /*addr*/) {
   ESP_LOGW(TAG, "WP entity disconnected");
   connected_          = false;
+  mpc_connected_      = false;
+  last_heartbeat_ms_  = 0;
   have_remote_entity_ = false;
   active_limit_w_     = 0.0f;
   pairing_state_      = "Getrennt — suche WP...";
 
-  if (eg_lpc_) EgLpcStopHeartbeat(eg_lpc_);
+  /* Do NOT stop the heartbeat on disconnect — eebus-go never stops it.
+   * Keeping it running ensures the feature data is always fresh for the
+   * next time K40RF connects and subscribes. */
 
   for (auto* t : disconnected_triggers_) t->trigger();
 }
@@ -333,7 +420,7 @@ void EebusWpComponent::on_power_limit_ack(float watts, bool active) {
   ESP_LOGD(TAG, "WP ACK limit %.0f W active=%s", watts, active ? "yes" : "no");
 }
 
-void EebusWpComponent::on_power_reading(float watts) {
+void EebusWpComponent::on_mpc_measurement(float watts) {
   current_power_w_ = watts;
   for (auto* t : power_triggers_) t->trigger(watts);
 }
@@ -365,7 +452,7 @@ bool EebusWpComponent::load_cert_nvs_(
     if (nvs_get_blob(h, NVS_KEY_CERT, nullptr, &clen) != ESP_OK || clen == 0) break;
     if (nvs_get_blob(h, NVS_KEY_KEY,  nullptr, &klen) != ESP_OK || klen == 0) break;
     *c = (uint8_t*)malloc(clen); *k = (uint8_t*)malloc(klen);
-    if (!*c || !*k) { free(*c); free(*k); break; }
+    if (!*c || !*k) { free(*c); *c = nullptr; free(*k); *k = nullptr; break; }
     if (nvs_get_blob(h, NVS_KEY_CERT, *c, &clen) != ESP_OK) break;
     if (nvs_get_blob(h, NVS_KEY_KEY,  *k, &klen) != ESP_OK) break;
     *cl = clen; *kl = klen; ok = true;
@@ -493,8 +580,10 @@ bool EebusWpComponent::start_eebus_service_(
   /* Register remote WP SKI if configured */
   // (done after service start via EEBUS_SERVICE_REGISTER_REMOTE_SKI)
 
-  /* Create service — correct 4-argument signature from eebus_service.h */
-  service_ = EebusServiceCreate(cfg, "EnergyManagementSystem", tls_cert,
+  /* Role "auto" (kShipRoleAuto): HEMS can both initiate outbound and accept inbound.
+   * Simultaneous-connect races are resolved by SKI tie-breaking in ship_node.c,
+   * matching the ship-go v0.6.0 keepThisConnection approach. */
+  service_ = EebusServiceCreate(cfg, "auto", tls_cert,
                                  SERVICE_READER_OBJECT(&service_reader_));
   EebusServiceConfigDelete(cfg);
   if (!service_) { ESP_LOGE(TAG, "EebusServiceCreate failed"); return false; }
@@ -536,15 +625,26 @@ bool EebusWpComponent::start_eebus_service_(
   eg_lpc_ = EgLpcUseCaseCreate(local_entity_, EG_LP_LISTENER_OBJECT(&eg_listener_));
   if (!eg_lpc_) { ESP_LOGE(TAG, "EgLpcUseCaseCreate failed"); return false; }
 
+  /* MaMpc (Monitoring of Power Consumption): required so the WP can report its
+   * power draw to the HEMS and shows "EEBus verbunden" on its own display.
+   * The Go bridge (eebus-ha-bridge) registers this as its "Monitoring" use case. */
+  MA_MPC_LISTENER_INTERFACE(&mpc_listener_) = &kMpcListenerMethods;
+  mpc_listener_.self = this;
+  ma_mpc_ = MaMpcUseCaseCreate(local_entity_, MA_MPC_LISTENER_OBJECT(&mpc_listener_));
+  if (!ma_mpc_) { ESP_LOGW(TAG, "MaMpcUseCaseCreate failed — WP may not show EEBus verbunden"); }
+
   /* Register entity with device so it is advertised via SPINE/mDNS */
   DEVICE_LOCAL_ADD_ENTITY(device_local, local_entity_);
 
-  /* Start service — begins mDNS announcement and SHIP server */
-  EEBUS_SERVICE_START(service_);
-  // EEBUS_SERVICE_START returns void in this version of openeebus
+  /* Subscribe so remote SPINE announcements from K40RF appear in log under tag "eebus" */
+  EventSubscribe(kEventHandlerLevelApplication, spine_event_handler, nullptr);
 
-  pairing_state_ = "Suche WP via mDNS...";
-  ESP_LOGI(TAG, "EEBus WP service started");
+  /* Service start is deferred to refresh_heartbeat() (called on the first
+   * on_time_sync event from SNTP or HA).  This guarantees K40RF cannot
+   * subscribe while the stored DeviceDiagnosis heartbeat data still carries
+   * an epoch timestamp — the root cause of its persistent "no connection"
+   * display state. */
+  ESP_LOGI(TAG, "EEBus WP setup complete — awaiting time sync before service start");
   return true;
 }
 
@@ -575,6 +675,25 @@ void EebusWpComponent::forget_pairing() {
   save_remote_ski_nvs_("");
   remote_ski_.clear();
   enter_pairing_mode();
+}
+
+void EebusWpComponent::refresh_heartbeat() {
+  if (!eg_lpc_) return;
+  if (!time_synced_) {
+    time_synced_ = true;
+    EgLpcStartHeartbeat(eg_lpc_);  /* store valid timestamp before any subscriber arrives */
+  }
+  if (!service_started_ && service_) {
+    service_started_ = true;
+    /* Startup announcement logged here (after time sync) so esphome logs captures it */
+    ESP_LOGD("eebus", "SPINE local: device=EnergyManagementSystem entity=CEM(id=1) heartbeat=%us",
+             kHeartbeatTimeoutSeconds);
+    ESP_LOGD("eebus", "SPINE local use-case: actor=EnergyGuard(9) useCase=limitationOfPowerConsumption(14) [EG/LPC]");
+    ESP_LOGD("eebus", "SPINE local use-case: actor=MonitoringAppliance(19) useCase=monitoringOfPowerConsumption(25) [MA/MPC]");
+    EEBUS_SERVICE_START(service_);
+    pairing_state_ = "Suche WP via mDNS...";
+    ESP_LOGI(TAG, "EEBus WP service started after time sync");
+  }
 }
 
 }  // namespace eebus_wp

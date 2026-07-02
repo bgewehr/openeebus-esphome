@@ -362,7 +362,9 @@ EebusError DeviceLocalTryStart(DeviceLocal* self) {
     return kEebusErrorMemory;
   }
 
-  self->thread = EebusThreadCreate(DeviceLocalLoop, self, 16 * 1024);
+  // bg-patch: 16 KB overflows when processing K40RF's 3-use-case discovery
+  // data (13-level call chain with large SPINE structs on stack). 32 KB safe.
+  self->thread = EebusThreadCreate(DeviceLocalLoop, self, 32 * 1024);
   if (self->thread == NULL) {
     DEVICE_LOCAL_DEBUG_PRINTF("%s(), start thread failed\n", __func__);
     return kEebusErrorThread;

@@ -630,6 +630,10 @@ EebusError Serialize(ShipMessageSerialize* self, const void* value, MsgValueType
   if ((self->json_obj == NULL) || (self->buf == NULL)) {
     return kEebusErrorMemory;
   }
+  /* bg-patch: initialize buf to safe defaults so SerializeReset() can safely
+   * call MessageBufferRelease() if Serialize fails before StringToShipMessage
+   * initializes it — uninitialized buf causes a NULL function pointer crash. */
+  MessageBufferInit(self->buf, NULL, 0);
 
   EebusError ret = SerializeMessage(self, value, value_type);
   if (ret != kEebusErrorOk) {

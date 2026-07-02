@@ -22,6 +22,9 @@
 #include <time.h>
 
 #include "src/common/eebus_malloc.h"
+
+/* ESPHome log bridge — defined in eebus_wp.cpp */
+extern void eebus_log_d(const char* tag, int line, const char* fmt, ...);
 #include "src/spine/api/entity_local_interface.h"
 #include "src/spine/api/feature_local_interface.h"
 #include "src/spine/api/heartbeat_manager_interface.h"
@@ -131,12 +134,20 @@ void Tick(HeartbeatManagerObject* self) {
   if (hm->tick_cnt == 0) {
     hm->heartbeat_num++;
     UpdateHeartbeatData(hm);
-    // On timeout, reset the heartbeat counter
-    hm->tick_cnt = hm->heartbeat_timeout;
+    /* Use 3/4 of the declared timeout (45 s for a 60 s interval) so the next
+     * heartbeat arrives ~15 s before the remote's strict 1× deadline.
+     * Without this fix, beats land at T=0/30/90 — the T=90 beat races
+     * against the K40rf's T=30+60=90 disconnect timer and loses. */
+    hm->tick_cnt = (hm->heartbeat_timeout * 3u) / 4u;
+    if (hm->tick_cnt == 0u) {
+      hm->tick_cnt = 1u;
+    }
   }
 }
 
 void UpdateHeartbeatData(HeartbeatManager* self) {
+  eebus_log_d("eebus_wp", __LINE__, "HEMS\xe2\x86\x92WP heartbeat (outbound): counter=%llu timeout=%us",
+              (unsigned long long)self->heartbeat_num, (unsigned)self->heartbeat_timeout);
   DeviceDiagnosisHeartbeatDataType heartbeat_data = {
       .timestamp         = &ABSOLUTE_OR_RELATIVE_TIME_NOW,
       .heartbeat_counter = &self->heartbeat_num,

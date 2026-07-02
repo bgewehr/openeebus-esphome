@@ -354,7 +354,23 @@ void WriteMessage(DataWriterObject* self, const uint8_t* msg, size_t msg_size) {
   uint8_t* const msg_copy = (uint8_t*)ArrayCopy(msg, msg_size, sizeof(msg[0]));
   MessageBufferInit(&queue_msg.msg_buf, msg_copy, msg_size);
 
-  EEBUS_QUEUE_SEND(sc->msg_queue, &queue_msg, kTimeoutInfinite);
+  /* bg-patch: guard against OOM — ArrayCopy returns NULL when heap is
+   * exhausted or too fragmented.  A NULL-data queue message would crash the
+   * consumer, so drop early. */
+  if (msg_copy == NULL) {
+    SHIP_LOGW("WriteMessage: OOM, dropping SPINE msg (%zu bytes)", msg_size);
+    return;
+  }
+
+  /* bg-patch: use a finite timeout instead of kTimeoutInfinite.  WriteMessage
+   * can be called from within the EEBus receive callback — if the queue is
+   * full and we wait forever we deadlock the EEBus task on its own queue,
+   * triggering TWDT.  1 000 ms gives the consumer time to drain a slot while
+   * still bounding the worst-case block well below the watchdog threshold. */
+  if (EEBUS_QUEUE_SEND(sc->msg_queue, &queue_msg, 1000) != kEebusErrorOk) {
+    SHIP_LOGW("WriteMessage: queue still full after 1 s, dropping SPINE msg (%zu bytes)", msg_size);
+    MessageBufferRelease(&queue_msg.msg_buf);
+  }
 }
 
 void ReportConnectionError(ShipConnection* self, EebusError err) {
@@ -400,6 +416,10 @@ void ShipConnectionWebsocketCallback(WebsocketCallbackType type, const void* in,
     queue_msg.type = kShipConnectionQueueMsgTypeDataReceived;
 
     uint8_t* const msg_copy = (uint8_t*)ArrayCopy(in, size, sizeof(uint8_t));
+    if (msg_copy == NULL) {
+      SHIP_LOGW("WebsocketCallback: OOM, dropping received msg (%zu bytes)", size);
+      return;
+    }
     MessageBufferInit(&queue_msg.msg_buf, msg_copy, size);
     EEBUS_QUEUE_SEND(sc->msg_queue, &queue_msg, kTimeoutInfinite);
   } else if (type == kWebsocketCallbackTypeError) {
@@ -1059,10 +1079,16 @@ EebusError SmeHandshakeAccessMethodsHandle(ShipConnection* self, ShipMessageDese
   SHIP_LOGW("AccessMethods: exchange complete remote_id=%s (ski=%s)",
             self->remote_ship_id ? self->remote_ship_id : "?",
             self->remote_ski ? self->remote_ski : "?");
+  /* bg-patch: report ship_id HERE (after AccessMethods exchange populates
+   * remote_ship_id) instead of in SmeStateApproved where it is still empty. */
+  INFO_PROVIDER_REPORT_SERVICE_SHIP_ID(self->info_provider, self->remote_ski, self->remote_ship_id);
   return kEebusErrorOk;
 }
 
 void SmeStateApproved(ShipConnection* self) {
+  /* bg-patch: INFO_PROVIDER_REPORT_SERVICE_SHIP_ID moved to
+   * SmeHandshakeAccessMethodsHandle — remote_ship_id is empty here (state 37),
+   * it is only populated after the AccessMethods exchange in state 38. */
   self->data_reader
       = INFO_PROVIDER_SETUP_REMOTE_DEVICE(self->info_provider, self->remote_ski, DATA_WRITER_OBJECT(self));
   EEBUS_TIMER_STOP(self->wait_for_ready_timer);

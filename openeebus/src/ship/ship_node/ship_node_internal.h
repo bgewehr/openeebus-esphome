@@ -76,6 +76,9 @@ struct ShipNode {
   HttpServerObject* http_server;
   bool connection_attempt_running;
   ShipRole role;
+  // mDNS-triggered outbound attempts to skip after any connection close.
+  // Each mDNS cycle is 10-20 s; 100 cycles ≈ 25-33 min cooldown.
+  uint32_t outbound_skip_remaining;
 };
 
 #define SHIP_NODE(obj) ((ShipNode*)(obj))
