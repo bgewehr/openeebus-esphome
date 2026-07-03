@@ -18,20 +18,31 @@
  * @brief Debug functions implementation
  */
 
-#include <libwebsockets.h>
+#include "src/common/debug.h"
+
+#include <ctype.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
 #ifdef _WIN32
-#include <sys/timeb.h>
 #include <windows.h>
-#endif
+#endif  // _WIN32
 
 void DebugPrintf(const char* format, ...) {
-  // TODO: Add platform independent timestamp printing
-  char timestamp_buf[50] = "";
-  lwsl_timestamp(LLL_NOTICE, timestamp_buf, sizeof(timestamp_buf));
-  printf("%s ", timestamp_buf);
+  time_t now;
+  struct tm tm;
+
+  time(&now);
+#ifdef _WIN32
+  localtime_s(&tm, &now);
+#else
+  localtime_r(&now, &tm);
+#endif  // _WIN32
+
+  char timestamp_buf[16];
+  strftime(timestamp_buf, sizeof(timestamp_buf), "%H:%M:%S", &tm);
+  printf("[%s] ", timestamp_buf);
 
   va_list args;
   va_start(args, format);
@@ -40,8 +51,28 @@ void DebugPrintf(const char* format, ...) {
 }
 
 void DebugHexdump(void* data, size_t data_size) {
-  // TODO: Add platform independent hexdump
-#ifndef GTEST
-  lwsl_hexdump_notice(data, data_size);
-#endif  // GTEST
+  const uint8_t* const bytes = (const uint8_t*)data;
+
+  for (size_t offset = 0; offset < data_size; offset += 16) {
+    const size_t line_size = ((data_size - offset) < 16) ? (data_size - offset) : 16;
+
+    printf("%08zx  ", offset);
+    for (size_t i = 0; i < 16; ++i) {
+      if (i < line_size) {
+        printf("%02x ", bytes[offset + i]);
+      } else {
+        printf("   ");
+      }
+      if (i == 7) {
+        printf(" ");
+      }
+    }
+
+    printf(" |");
+    for (size_t i = 0; i < line_size; ++i) {
+      const uint8_t byte = bytes[offset + i];
+      printf("%c", isprint(byte) ? (char)byte : '.');
+    }
+    printf("|\n");
+  }
 }
