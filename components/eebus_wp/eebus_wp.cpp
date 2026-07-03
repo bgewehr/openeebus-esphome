@@ -160,7 +160,16 @@ static void SR_OnRemoteServicesUpdate(
    * spurious connections in the wrong direction. */
   auto* r = reinterpret_cast<WpServiceReader*>(o);
   size_t n = VectorGetSize(entries);
-  ESP_LOGD("eebus", "mDNS WP scan: %zu entr%s visible", n, n == 1 ? "y" : "ies");
+  ESP_LOGD("eebus", "mDNS WP scan: %zu entr%s visible (periodic browser, ~15 s interval)",
+           n, n == 1 ? "y" : "ies");
+  for (size_t i = 0; i < n; i++) {
+    const MdnsEntry* entry = (const MdnsEntry*)VectorGetElement(entries, i);
+    const char* ski  = MdnsEntryGetSki(entry);
+    const char* host = MdnsEntryGetHost(entry) ? MdnsEntryGetHost(entry) : "?";
+    if (ski && ski[0] != '\0') {
+      ESP_LOGD("eebus", "  mDNS[%zu]: ski=%s host=%s", i, ski, host);
+    }
+  }
   if (!r->self->pairing_mode_active_) return;
   if (!r->self->remote_ski_.empty()) return;  /* already paired */
 
