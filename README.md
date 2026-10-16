@@ -1,5 +1,26 @@
 # openeebus-esphome
 
+> **Historical development version - do not use for new installations.**
+> The current ESPHome integration and build instructions are maintained in
+> [bgewehr/esphome-hems](https://github.com/bgewehr/esphome-hems).
+> This repository is retained for history. The `eebus_lpc` / `eebus_wp`
+> snippets below are not a supported standalone `external_components` setup.
+> Earlier hardware, completion and regulatory claims below are historical,
+> not verified support or conformity guarantees. Consult the current README
+> for the tested board, ESPHome version and minimal build/pairing example.
+
+Start with a complete checkout, including the OpenEEBus submodule:
+
+```bash
+git clone --recurse-submodules https://github.com/bgewehr/esphome-hems.git
+```
+
+The current components are `eebus_cs` (receive limits from a CLS gateway) and
+`eebus_eg` (send limits to a controllable device). Keep the library and ESP32
+port alongside the components; copying just the components is insufficient.
+
+## Historical documentation
+
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![ESPHome](https://img.shields.io/badge/ESPHome-external--component-green)](https://esphome.io/components/external_components)
 [![§14a EnWG](https://img.shields.io/badge/§14a-EnWG-orange)](https://www.gesetze-im-internet.de/enwg_2005/__14a.html)
